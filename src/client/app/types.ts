@@ -147,5 +147,42 @@ export interface VfoConflictDialog {
 	optionB: { centerFreq: number; description: string; excludedVfos: number[] } | null;
 }
 
+export interface RemoteClientEntry {
+	id: string;
+	connectedAt: number;
+	country: string;
+	vfoCount: number;
+	firstFreq: number | null;
+	isRelay: boolean;
+}
+
+export interface DevicePickerEntry {
+	device: USBDevice;
+	driverName: string;
+	productName: string;
+}
+
+export interface VfoActivityStat {
+	count: number;
+	totalMs: number;
+	squelchOpenSince: number | null;
+}
+
+export interface DspStats {
+	squelchOpen: boolean[];
+	squelchDb: number[];
+	usbFps: number;
+	audioFps: number;
+	dspAvgMs: number | string;
+	dspMaxMs: number | string;
+	audioRate: number;
+	inputRate: number;
+	dropped: number;
+	chunkSize: number;
+	msgRate?: number;
+	workerCount: number;
+	hardwareConcurrency: number;
+}
+
 // Use `any` for the full AppInstance type since it's complex with Vue internals
 export type AppInstance = any;

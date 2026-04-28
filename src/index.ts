@@ -8,6 +8,11 @@
  * - Run `npm run deploy` to publish to Cloudflare
  */
 
+interface KVNamespace {
+	get(key: string): Promise<string | null>;
+	put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>;
+}
+
 interface Env {
 	EXPRESS_TURN_URL: string;
 	EXPRESS_TURN_USER: string;
@@ -17,6 +22,7 @@ interface Env {
 	ASSETS: {
 		fetch(request: Request): Promise<Response>;
 	};
+	BOOKMARKS?: KVNamespace;
 }
 
 interface IceServerEntry {
@@ -84,6 +90,35 @@ export default {
 				JSON.stringify({ iceServers }),
 				{ headers: { 'Content-Type': 'application/json', ...coopHeaders } }
 			);
+		}
+
+		// Bookmark cloud sync — GET fetches, PUT stores (token acts as a shared secret)
+		if (url.pathname === '/api/bookmarks' && env.BOOKMARKS) {
+			const token = url.searchParams.get('token') ?? '';
+			if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token)) {
+				return new Response('Invalid token', { status: 400, headers: coopHeaders });
+			}
+			const key = `bookmarks:${token}`;
+
+			if (request.method === 'GET') {
+				const value = await env.BOOKMARKS.get(key);
+				if (!value) return new Response('Not found', { status: 404, headers: coopHeaders });
+				return new Response(value, { headers: { 'Content-Type': 'application/json', ...coopHeaders } });
+			}
+
+			if (request.method === 'PUT') {
+				const body = await request.text();
+				if (body.length > 512 * 1024) {
+					return new Response('Payload too large', { status: 413, headers: coopHeaders });
+				}
+				try { JSON.parse(body); } catch {
+					return new Response('Invalid JSON', { status: 400, headers: coopHeaders });
+				}
+				await env.BOOKMARKS.put(key, body, { expirationTtl: 365 * 24 * 60 * 60 });
+				return new Response('OK', { status: 200, headers: coopHeaders });
+			}
+
+			return new Response('Method not allowed', { status: 405, headers: coopHeaders });
 		}
 
 		// Proxy HuggingFace model downloads to avoid CORS issues

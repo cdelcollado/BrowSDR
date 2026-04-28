@@ -144,6 +144,8 @@ export class AirspyDevice implements SdrDevice {
 			case 'Bias-T':
 				await this.vendorOut(AIRSPY_SET_RF_BIAS_CMD, 0, value ? 1 : 0);
 				break;
+			default:
+				console.warn(`[BrowSDR:Airspy] unknown gain "${name}"`);
 		}
 	}
 
@@ -173,7 +175,7 @@ export class AirspyDevice implements SdrDevice {
 				} catch (e: unknown) {
 					if (this.rxRunning) {
 						const msg = e instanceof Error ? e.message : String(e);
-						console.error('Airspy: transfer error:', msg);
+						console.error('[BrowSDR:Airspy] transfer error:', msg);
 					}
 					break;
 				}

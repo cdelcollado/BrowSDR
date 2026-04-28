@@ -36,7 +36,15 @@
 	 * https://developers.cloudflare.com/workers/static-assets/binding/
 	 */
 	"assets": { "directory": "./dist/", "binding": "ASSETS" },
-	"build": { "command": "npx vite build", "watch_dir": "src/client" }
+	"build": { "command": "npx vite build", "watch_dir": "src/client" },
+	/**
+	 * KV namespace for bookmark cloud sync.
+	 * Create with: npx wrangler kv namespace create BOOKMARKS
+	 * Then fill in the id and preview_id returned by that command.
+	 */
+	"kv_namespaces": [
+		{ "binding": "BOOKMARKS", "id": "", "preview_id": "" }
+	]
 	/**
 	 * Service Bindings (communicate between multiple Workers)
 	 * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings

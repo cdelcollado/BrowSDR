@@ -25,6 +25,15 @@ declare const window: Window & { Peer: any };
 /** Prefix prepended to all PeerJS IDs (hidden from users / share links). */
 export const PEER_ID_PREFIX = 'browsdr-';
 
+/**
+ * Exponential backoff with ±25% jitter.
+ * attempt=0 → base ms, attempt=1 → 2×base, etc., capped at cap ms.
+ */
+export function backoffDelay(attempt: number, base = 1000, cap = 30000): number {
+	const ms = Math.min(cap, base * Math.pow(2, attempt));
+	return ms * (0.75 + Math.random() * 0.5);
+}
+
 export class WebRTCHandler {
 	isHost: boolean;
 	peer: any;
@@ -95,7 +104,11 @@ export class WebRTCHandler {
 		}
 
 		return new Promise<string>((resolve, reject) => {
-			const connectWithRetry = (retries: number) => {
+			const MAX_RECONNECT = 5;
+			let reconnectAttempt = 0;
+			let resolved = false;
+
+			const connectWithRetry = (retries: number, attempt: number = 0) => {
 				const peerOpts = peerConfig ? { config: peerConfig } : {};
 				if (this.isHost) {
 					// Reuse preferred ID if available, otherwise generate a new 5-char code
@@ -108,6 +121,7 @@ export class WebRTCHandler {
 
 				this.peer.on('open', (id: string) => {
 					console.log('[WebRTC] Peer ID:', id);
+					reconnectAttempt = 0;
 
 					if (this.isHost) {
 						this._setStatus({ status: 'ready', id: id });
@@ -117,7 +131,10 @@ export class WebRTCHandler {
 							this._connectToHost();
 						}
 					}
-					resolve(id);
+					if (!resolved) {
+						resolved = true;
+						resolve(id);
+					}
 				});
 
 				this.peer.on('connection', (conn: any) => {
@@ -131,17 +148,33 @@ export class WebRTCHandler {
 						console.warn('[WebRTC] Generated ID was taken, retrying with new ID...');
 						this.preferredHostId = null; // Don't reuse the taken ID
 						this.peer.destroy();
-						connectWithRetry(retries - 1);
+						setTimeout(() => connectWithRetry(retries - 1, attempt + 1), backoffDelay(attempt));
 						return;
 					}
 
 					console.error('[WebRTC] PeerJS error:', err);
 					this._setStatus({ status: 'error', error: err.type });
-					reject(err);
+					if (!resolved) {
+						resolved = true;
+						reject(err);
+					}
 				});
 
 				this.peer.on('disconnected', () => {
 					this._setStatus({ status: 'disconnected' });
+					if (reconnectAttempt < MAX_RECONNECT) {
+						const delay = backoffDelay(reconnectAttempt);
+						console.warn(`[WebRTC] Disconnected from signaling server, reconnecting in ${Math.round(delay)}ms (attempt ${reconnectAttempt + 1}/${MAX_RECONNECT})`);
+						setTimeout(() => {
+							if (this.peer && !this.peer.destroyed) {
+								reconnectAttempt++;
+								this.peer.reconnect();
+							}
+						}, delay);
+					} else {
+						console.error('[WebRTC] Signaling server reconnect failed after max attempts');
+						this._setStatus({ status: 'error', error: 'reconnect-failed' });
+					}
 				});
 			};
 

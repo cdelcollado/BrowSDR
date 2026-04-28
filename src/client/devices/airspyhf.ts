@@ -145,6 +145,8 @@ export class AirspyHfDevice implements SdrDevice {
 			case 'HF LNA':
 				await this.vendorOut(AIRSPYHF_SET_LNA, 0, value ? 1 : 0);
 				break;
+			default:
+				console.warn(`[BrowSDR:AirspyHF] unknown gain "${name}"`);
 		}
 	}
 
@@ -177,7 +179,7 @@ export class AirspyHfDevice implements SdrDevice {
 				} catch (e: unknown) {
 					if (this.rxRunning) {
 						const msg = e instanceof Error ? e.message : String(e);
-						console.error('AirspyHF: transfer error:', msg);
+						console.error('[BrowSDR:AirspyHF] transfer error:', msg);
 					}
 					break;
 				}

@@ -47,8 +47,19 @@ import {
 	feedRemoteAudioChunk,
 } from './remote-clients';
 import { startRxStream } from './rx-stream';
+import { validateFrequency, validateSampleRate, clampGain, validateAndClampGains } from './validation';
 import type { VfoParams, VfoState, PerfCounters, RxStreamOpts, RemoteClientState, DeviceOpenOpts } from './types';
 
+/**
+ * SDR backend running inside a Web Worker, exposed to the main thread via Comlink.
+ *
+ * Comlink contract: every method call crosses a MessageChannel boundary, so all
+ * methods appear `async` to callers regardless of whether they return a Promise.
+ * Callbacks passed to `startRxStream` / `startRx` must be wrapped with
+ * `Comlink.proxy()` on the caller side so they can be invoked across the channel.
+ *
+ * Lifecycle: `init` → `open` → `startRxStream` → (use) → `stopRx` → `close`.
+ */
 export class Backend {
 	// Hardware — generic SDR device
 	device: SdrDevice | null = null;
@@ -92,11 +103,16 @@ export class Backend {
 	constructor() {
 	}
 
+	/** Loads the WASM DSP module. Must be called before `open`. */
 	async init(): Promise<void> {
 		await ensureWasmInitialized();
 		this.wasm = await init();
 	}
 
+	/**
+	 * Opens a USB SDR device. Pass `"mock"` for a software-only HackRF simulator.
+	 * Returns `false` (rather than throwing) when no matching device is found.
+	 */
 	async open(opts?: DeviceOpenOpts | "mock"): Promise<boolean> {
 		if (opts === "mock") {
 			this.device = new MockHackRF();
@@ -161,10 +177,21 @@ export class Backend {
 	initRemoteClient = initRemoteClient.bind(this);
 	feedRemoteAudioChunk = feedRemoteAudioChunk.bind(this);
 
+	/**
+	 * Starts the full DSP pipeline: IQ capture → FFT → per-VFO demodulation.
+	 * All callbacks must be wrapped with `Comlink.proxy()` on the caller side.
+	 * `spectrumCallback(fftData: Float32Array)` fires at ~10 Hz.
+	 * `audioCallback(vfoIndex, samples: Float32Array)` fires per decoded audio chunk.
+	 */
 	async startRxStream(opts: RxStreamOpts, spectrumCallback: any, audioCallback: any, whisperCallback: any = null, pocsagCallback: any = null): Promise<void> {
 		return startRxStream(this, opts, spectrumCallback, audioCallback, whisperCallback, pocsagCallback);
 	}
 
+	/**
+	 * Returns a snapshot of DSP performance counters and per-VFO squelch state.
+	 * Side effect: latches the current squelch state so the next call reports
+	 * any squelch-open event that occurred between calls (prevents missed blinks).
+	 */
 	getDspStats(): any {
 		if (!this._perf) return null;
 
@@ -178,6 +205,9 @@ export class Backend {
 			...this._perf.report,
 			squelchOpen: combinedSquelch,
 			squelchDb: this.vfoStates ? this.vfoStates.map(s => s.squelchDb ?? -120) : [],
+			workerCount: this.dspWorkers?.length ?? 0,
+			hardwareConcurrency: (typeof navigator !== 'undefined' && navigator.hardwareConcurrency > 0)
+				? navigator.hardwareConcurrency : 0,
 		};
 	}
 
@@ -198,8 +228,22 @@ export class Backend {
 		}
 	}
 
+	/**
+	 * Adds a VFO and its dedicated DSP worker. Returns the new VFO index.
+	 * Emits a console warning when the total exceeds `hardwareConcurrency - 1`.
+	 * Only valid after `startRxStream` has been called (requires `_spawnWorker`).
+	 */
 	addVfo(): number {
 		if (!this.vfoParams) return -1;
+		const hwConcurrency = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency > 0)
+			? navigator.hardwareConcurrency : 4;
+		const recommendedMax = Math.max(1, hwConcurrency - 1);
+		if (this.vfoParams.length >= recommendedMax) {
+			console.warn(
+				`[BrowSDR:Backend] Adding VFO ${this.vfoParams.length + 1} exceeds recommended maximum ` +
+				`(${recommendedMax}) for a ${hwConcurrency}-core system — DSP workers may compete for CPU`
+			);
+		}
 		const centerFreq = this._centerFreq || 100.0;
 		const bw = 150000;
 		const params: VfoParams = { freq: centerFreq, mode: 'wfm', enabled: false, deEmphasis: '50us', squelchEnabled: false, squelchLevel: -100.0, lowPass: true, highPass: false, bandwidth: bw, volume: 50, pocsag: false };
@@ -212,6 +256,7 @@ export class Backend {
 		return index;
 	}
 
+	/** Terminates the DSP worker for `index` and removes the VFO. No-op if only one VFO remains. */
 	removeVfo(index: number): void {
 		if (!this.vfoParams || index < 0 || index >= this.vfoParams.length) return;
 		if (this.vfoParams.length <= 1) return;
@@ -229,11 +274,14 @@ export class Backend {
 
 	async setSampleRate(rate: number): Promise<void> {
 		if (!this.device) throw new Error('No device connected');
+		validateSampleRate(rate, this.device.sampleRates);
 		await this.device.setSampleRate(rate);
 	}
 
+	/** Tunes the hardware and propagates the new center frequency to all VFO DSP workers. */
 	async setFrequency(freqHz: number): Promise<void> {
 		if (!this.device) throw new Error('No device connected');
+		validateFrequency(freqHz);
 		await this.device.setFrequency(freqHz);
 		
 		this._centerFreq = freqHz / 1e6;
@@ -269,20 +317,23 @@ export class Backend {
 
 	async setGain(name: string, value: number): Promise<void> {
 		if (!this.device) throw new Error('No device connected');
-		await this.device.setGain(name, value);
+		const clamped = clampGain(name, value, this.device.gainControls);
+		await this.device.setGain(name, clamped);
 	}
 
 	async setGains(gains: Record<string, number>): Promise<void> {
 		if (!this.device) throw new Error('No device connected');
+		const validated = validateAndClampGains(gains, this.device.gainControls);
 		if (this.device.setGains) {
-			await this.device.setGains(gains);
+			await this.device.setGains(validated);
 		} else {
-			for (const [name, value] of Object.entries(gains)) {
+			for (const [name, value] of Object.entries(validated)) {
 				await this.device.setGain(name, value);
 			}
 		}
 	}
 
+	/** Low-level raw IQ callback. Prefer `startRxStream` which wires up the full DSP pipeline. */
 	async startRx(callback: any): Promise<void> {
 		if (!this.device) throw new Error('No device connected');
 		await this.device.startRx(callback);

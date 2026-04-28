@@ -27,7 +27,7 @@ export class MockHackRF implements SdrDevice {
 	readonly gainControls: GainControl[] = [
 		{ name: 'LNA', min: 0, max: 40, step: 8, default: 16, type: 'slider' },
 		{ name: 'VGA', min: 0, max: 62, step: 2, default: 16, type: 'slider' },
-		{ name: 'Amp', min: 0, max: 1, step: 1, default: 0, type: 'checkbox' },
+		{ name: 'Amp (14dB)', min: 0, max: 1, step: 1, default: 0, type: 'checkbox' },
 	];
 
 	private running = false;

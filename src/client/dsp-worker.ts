@@ -1,38 +1,32 @@
 import init, { DspProcessor, set_panic_hook, alloc_iq_buffer, free_iq_buffer } from "/hackrf-web/pkg/hackrf_web.js";
 import { RationalResampler } from './worker/dsp-pipeline';
+import type { DspWorkerInMessage, DspWorkerOutMessage, DspWorkerVfoState } from './worker/dsp-worker-types';
+import type { VfoParams } from './worker/types';
+import { IF_RATES, AUDIO_RATE } from './worker/types';
 
 // --- Worker State ---
 let wasmInitPromise: Promise<void> | null = null;
-let _wasm: any;
-let ddc: any;
-let vfoState: any;
+let _wasm!: { memory: WebAssembly.Memory };
+let ddc!: DspProcessor;
+let vfoState!: DspWorkerVfoState;
 let sharedIqPtr = 0;
 let sharedSabViews: Int8Array[] | null = null;
 
-const IF_RATES: Record<string, number> = {
-    nfm: 50000,
-    wfm: 250000,
-    am: 15000,
-    usb: 24000,
-    lsb: 24000,
-    dsb: 24000,
-    cw: 3000,
-    raw: 48000,
-};
-const AUDIO_RATE = 48000;
-
 async function startup(): Promise<void> {
     if (!wasmInitPromise) {
-        wasmInitPromise = init().then((w: any) => {
+        wasmInitPromise = init().then((w: { memory: WebAssembly.Memory }) => {
             _wasm = w;
             set_panic_hook();
 
             // Allocate Wasm memory for this sub-module
             const MAX_USB_SAMPLES = 131072;
             sharedIqPtr = alloc_iq_buffer(MAX_USB_SAMPLES * 2);
-            console.log("DSP Worker: Wasm Initialized. IQ Buffer Ptr:", sharedIqPtr);
-        }).catch((err: any) => {
-            console.error("DSP Worker: Wasm Init Failed:", err);
+            console.info('[BrowSDR:DspWorker] WASM initialized, IQ buffer ptr:', sharedIqPtr);
+        }).catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error('[BrowSDR:DspWorker] WASM init failed:', err);
+            self.postMessage({ type: 'error', error: `WASM init failed: ${msg}` });
+            throw err; // re-throw so wasmInitPromise rejects — callers must guard
         });
     }
     await wasmInitPromise;
@@ -40,9 +34,14 @@ async function startup(): Promise<void> {
 
 let systemSampleRate = 2000000;
 
-self.onmessage = async (e: MessageEvent) => {
+self.onmessage = async (e: MessageEvent<DspWorkerInMessage>) => {
     const msg = e.data;
-    await startup();
+    try {
+        await startup();
+    } catch {
+        // WASM init failure already reported via postMessage in startup's catch
+        return;
+    }
 
     if (msg.type === "init") {
         systemSampleRate = msg.sampleRate;
@@ -63,8 +62,9 @@ self.onmessage = async (e: MessageEvent) => {
             scratchBuf: new Float32Array(512),
             audioTarget: new Float32Array(2048),
             squelchOpen: false,
+            squelchDb: -120,
         };
-        sharedSabViews = msg.sabs ? msg.sabs.map((s: SharedArrayBuffer) => new Int8Array(s)) : null;
+        sharedSabViews = msg.sabs ? msg.sabs.map(s => new Int8Array(s)) : null;
 
         configureDDC(msg.params, msg.centerFreq);
 
@@ -86,11 +86,11 @@ self.onmessage = async (e: MessageEvent) => {
         if (msg.useSab && sharedSabViews && msg.sabIndex !== undefined) {
             // Zero-copy grab from SAB ring!
             wasmMemView.set(sharedSabViews[msg.sabIndex].subarray(0, msg.chunkLen), sharedIqPtr);
-        } else if (msg.chunk) {
+        } else if (!msg.useSab) {
             // Direct copy from received buffer
             wasmMemView.set(new Int8Array(msg.chunk), sharedIqPtr);
         } else {
-            return; // Invalid chunk
+            return; // useSab requested but SAB not available
         }
 
         try {
@@ -102,24 +102,24 @@ self.onmessage = async (e: MessageEvent) => {
             if (audioOut) {
                 // We MUST slice/copy to isolate it from WASM before transferring
                 const cloneOut = audioOut.slice();
-                (self as any).postMessage({
+                self.postMessage({
                     type: "audio",
                     samples: cloneOut.buffer,
                     chunkId: msg.chunkId,
                     squelchOpen: vfoState.squelchOpen,
                     squelchDb: vfoState.squelchDb ?? -120,
                     dspTime: dspTime
-                }, [cloneOut.buffer]);
+                } satisfies DspWorkerOutMessage, { transfer: [cloneOut.buffer] });
             } else {
                 self.postMessage({ type: "audio", samples: null, chunkId: msg.chunkId, squelchOpen: vfoState.squelchOpen, squelchDb: vfoState.squelchDb ?? -120, dspTime: dspTime });
             }
-        } catch (err: any) {
-            self.postMessage({ type: "error", error: err.message });
+        } catch (err: unknown) {
+            self.postMessage({ type: "error", error: err instanceof Error ? err.message : String(err) });
         }
     }
 };
 
-function configureDDC(params: any, systemCenterFreq: number): void {
+function configureDDC(params: VfoParams, systemCenterFreq: number): void {
     const ifRate = IF_RATES[params.mode];
     if (ifRate === undefined) {
         console.error(`[DSP Worker] Unknown mode "${params.mode}" — no IF rate defined. Skipping DDC config.`);
@@ -145,7 +145,7 @@ function configureDDC(params: any, systemCenterFreq: number): void {
     ddc.set_audio_filters(params.lowPass || false, params.highPass || false);
 }
 
-function processVfoAudio(chunkLenBytes: number, params: any): Float32Array | null {
+function processVfoAudio(chunkLenBytes: number, params: VfoParams): Float32Array | null {
     const mode = params.mode;
     const bw = params.bandwidth;
 
@@ -154,7 +154,7 @@ function processVfoAudio(chunkLenBytes: number, params: any): Float32Array | nul
         try {
             outPtr = ddc.process_ptr(sharedIqPtr, chunkLenBytes);
         } catch (e) {
-            console.error("DEBUG process_ptr crashed:", e);
+            console.error('[BrowSDR:DspWorker] process_ptr crashed:', e);
             throw e;
         }
 
@@ -227,7 +227,7 @@ function processVfoAudio(chunkLenBytes: number, params: any): Float32Array | nul
         if (params.squelchEnabled && squelchDb < params.squelchLevel) {
             vfoState.squelchOpen = false;
             audioDemodRateSamples.fill(0);
-            const result = vfoState.audioResampler.process(audioDemodRateSamples);
+            const result = vfoState.audioResampler!.process(audioDemodRateSamples);
             return result.length > 0 ? result : null;
         }
 
@@ -315,7 +315,7 @@ function processVfoAudio(chunkLenBytes: number, params: any): Float32Array | nul
             audioDemodRateSamples.fill(0);
         }
 
-        const result = vfoState.audioResampler.process(audioDemodRateSamples);
+        const result = vfoState.audioResampler!.process(audioDemodRateSamples);
         if (result.length === 0) return null;
 
         for (let i = 0; i < result.length; i++) {

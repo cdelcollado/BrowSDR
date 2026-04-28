@@ -25,6 +25,7 @@ import { POCSAGDecoder } from './pocsag';
 import type { RxStreamOpts, VfoParams, VfoState, PerfCounters } from './types';
 import { IF_RATES, AUDIO_RATE } from './types';
 import type { Backend } from './backend';
+import type { DspWorkerOutMessage } from './dsp-worker-types';
 
 let _streamStarting = false;
 
@@ -115,19 +116,38 @@ export async function startRxStream(
 		backend.vfoStates = [makeVfoState()];
 		backend.dspWorkers = [];
 
+		// ── Concurrency ───────────────────────────────────────────────────
+		// Each VFO gets its own dsp-worker.ts thread. Leave one core for the
+		// backend worker itself; warn when VFO count will cause contention.
+		const hwConcurrency = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency > 0)
+			? navigator.hardwareConcurrency
+			: 4;
+		const recommendedMaxVfos = Math.max(1, hwConcurrency - 1);
+		console.info(`[BrowSDR:RxStream] Hardware concurrency: ${hwConcurrency} cores, recommended max VFOs: ${recommendedMaxVfos}`);
+
+		// ── Backpressure ──────────────────────────────────────────────────
+		// Track how many 'process' messages are in-flight to each DSP worker.
+		// If a worker falls behind and its queue depth exceeds this limit, new
+		// chunks are dropped rather than buffered indefinitely.
+		const MAX_WORKER_PENDING = 4;
+		const workerPending: number[] = [];
+
 		const spawnWorker = (index: number, params: VfoParams): Worker => {
 			const worker = new globalThis.Worker(new URL('../dsp-worker.ts', import.meta.url), { type: 'module' });
-			worker.onmessage = (e: MessageEvent) => {
+			workerPending[index] = 0;
+			worker.onmessage = (e: MessageEvent<DspWorkerOutMessage>) => {
 				const msg = e.data;
 				if (msg.type === "audio") {
 					// Look up current index dynamically — splice() in removeVfo
 					// shifts the array, so the captured `index` goes stale.
 					const currentIndex = backend.dspWorkers!.indexOf(worker);
 					if (currentIndex === -1) return; // worker was removed
+					if (workerPending[currentIndex] > 0) workerPending[currentIndex]--;
 					backend._handleWorkerAudio!(currentIndex, msg);
 				} else if (msg.type === "error") {
 					const currentIndex = backend.dspWorkers!.indexOf(worker);
-					console.error(`[DSP Worker ${currentIndex}] Error:`, msg.error);
+					if (workerPending[currentIndex] > 0) workerPending[currentIndex]--;
+					console.error(`[BrowSDR:DspWorker:${currentIndex}] ${msg.error}`);
 				}
 			};
 			worker.postMessage({
@@ -254,8 +274,9 @@ export async function startRxStream(
 			}
 		};
 
-		// ── Audio Processing — helper processes a single VFO ──────────
-		// Returns Float32Array of audio samples, or null if none produced
+		// [DEAD CODE] processVfoAudio was the original single-threaded inline DSP path.
+		// It is never called — all VFO processing now runs in dsp-worker.ts threads.
+		// TODO: remove this function once confirmed stable in production.
 		const processVfoAudio = (iqPtr: number, numIqBytes: number, ddc: any, params: VfoParams, vfoState: VfoState): Float32Array | null => {
 			// Mute = silence the speakers, not stop DSP. Still run the pipeline
 			// when POCSAG decoding is active so messages aren't lost while muted.
@@ -544,12 +565,21 @@ export async function startRxStream(
 				}
 
 				if (pocsagCallback && params.pocsag && params.mode === 'nfm') {
-					if (!state.pocsagDecoder) {
-						state.pocsagDecoder = new POCSAGDecoder(AUDIO_RATE, (pmsg: any) => {
-							pocsagCallback(v, params.freq, pmsg);
-						});
+					// If a lower-index VFO is already decoding this frequency, skip to avoid
+					// processing the same signal twice and emitting duplicate messages.
+					const isDuplicate = backend.vfoParams!.some(
+						(p, i) => i < v && p.pocsag && p.mode === 'nfm' && Math.abs(p.freq - params.freq) < 0.001
+					);
+					if (!isDuplicate) {
+						if (!state.pocsagDecoder) {
+							state.pocsagDecoder = new POCSAGDecoder(AUDIO_RATE, (pmsg: any) => {
+								pocsagCallback(v, params.freq, pmsg);
+							});
+						}
+						state.pocsagDecoder.process(out);
+					} else if (state.pocsagDecoder) {
+						state.pocsagDecoder = null; // freq collision resolved — release stale decoder
 					}
-					state.pocsagDecoder.process(out);
 				} else if (!params.pocsag && state.pocsagDecoder) {
 					state.pocsagDecoder = null;
 				}
@@ -671,10 +701,15 @@ export async function startRxStream(
 				}
 			}
 
-			// Broadcast to DSP workers
+			// Broadcast to DSP workers (with backpressure)
 			for (let v = 0; v < backend.dspWorkers!.length; v++) {
 				const worker = backend.dspWorkers![v];
 				if (!worker) continue;
+				if ((workerPending[v] ?? 0) >= MAX_WORKER_PENDING) {
+					perf.droppedChunks++;
+					continue;
+				}
+				workerPending[v] = (workerPending[v] ?? 0) + 1;
 				const params = backend.vfoParams![v];
 				if (typeof SharedArrayBuffer !== 'undefined') {
 					worker.postMessage({ type: 'process', params: params, useSab: true, sabIndex: backend.sabPoolIndex, chunkLen: signed.length, chunkId: chunkCounter });
@@ -709,7 +744,7 @@ export async function startRxStream(
 		// from the previous startRxStream and produce garbled audio.
 		backend._reinitRemoteClientWorkers();
 	} catch (e) {
-		console.error("DEBUG CRASH IN STARTRXSTREAM:", e);
+		console.error('[BrowSDR:RxStream] startRxStream failed:', e);
 		throw e;
 	} finally {
 		_streamStarting = false;

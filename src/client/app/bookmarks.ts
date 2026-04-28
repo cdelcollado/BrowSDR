@@ -1,5 +1,6 @@
 import type { AppInstance } from './types';
 import { makeDefaultVfo, BOOKMARK_CATEGORIES } from './constants';
+import { logWarn } from '../logger';
 
 export const bookmarkMethods = {
 	categoryLabel(this: AppInstance, value: string) {
@@ -279,6 +280,52 @@ export const bookmarkMethods = {
 				// Migrate old bookmarks without a type field
 				if (Array.isArray(bms)) this.bookmarks = bms.map((b: any) => ({ type: 'group', ...b }));
 			}
-		} catch (e) { }
+		} catch (e) { logWarn('Bookmarks', 'Failed to load saved bookmarks', e); }
+		this.initSyncToken();
+	},
+	initSyncToken(this: AppInstance) {
+		let token = localStorage.getItem('sdr-web-sync-token');
+		if (!token) {
+			token = crypto.randomUUID();
+			localStorage.setItem('sdr-web-sync-token', token);
+		}
+		this.syncToken = token;
+	},
+	async pushToCloud(this: AppInstance) {
+		if (!this.syncToken) return;
+		try {
+			const res = await fetch(`/api/bookmarks?token=${this.syncToken}`, {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ bookmarks: this.bookmarks }),
+			});
+			this.showMsg(res.ok ? 'Bookmarks pushed to cloud.' : 'Cloud push failed.');
+		} catch {
+			this.showMsg('Cloud push failed: network error.');
+		}
+	},
+	async pullFromCloud(this: AppInstance, mode: 'merge' | 'replace' = 'merge') {
+		if (!this.syncToken) return;
+		let res: Response;
+		try {
+			res = await fetch(`/api/bookmarks?token=${this.syncToken}`);
+		} catch {
+			this.showMsg('Cloud pull failed: network error.');
+			return;
+		}
+		if (res.status === 404) { this.showMsg('No cloud bookmarks found for this token.'); return; }
+		if (!res.ok) { this.showMsg('Cloud pull failed.'); return; }
+
+		const { bookmarks } = await res.json() as { bookmarks: any[] };
+		if (!Array.isArray(bookmarks)) { this.showMsg('Invalid data from cloud.'); return; }
+
+		if (mode === 'replace') {
+			this.bookmarks = bookmarks;
+		} else {
+			const existingIds = new Set(this.bookmarks.map((b: any) => b.id));
+			this.bookmarks.push(...bookmarks.filter((b: any) => !existingIds.has(b.id)));
+		}
+		this.saveBookmarks();
+		this.showMsg(`Pulled ${bookmarks.length} bookmark${bookmarks.length !== 1 ? 's' : ''} from cloud.`);
 	},
 };

@@ -3,10 +3,29 @@ import { VitePWA } from 'vite-plugin-pwa';
 import path from 'path';
 import fs from 'fs';
 
-// Plugin that runs after the main build to:
-// 1. Bundle the dsp-worker properly (Vite doesn't bundle nested workers)
-// 2. Copy WASM files to dist
-// 3. Fix .ts → .js extensions in output filenames and references
+// Workers that need explicit bundling after the main build:
+// - dsp-worker: spawned from inside another worker; Vite can't handle worker-in-worker automatically
+// - whisper-worker: loaded via plain URL, not Vite's worker import syntax
+const EXTRA_WORKERS: Array<{
+	entry: string;
+	outDir: string;
+	fileName: string;
+	external: (RegExp | string)[];
+}> = [
+	{
+		entry: 'src/client/dsp-worker.ts',
+		outDir: 'dist/assets',
+		fileName: 'dsp-worker.js',
+		external: [/\/hackrf-web\/pkg\//],
+	},
+	{
+		entry: 'src/client/whisper-worker.ts',
+		outDir: 'dist',
+		fileName: 'whisper-worker.js',
+		external: [/^https?:\/\//],
+	},
+];
+
 function postBuildPlugin(): Plugin {
 	return {
 		name: 'post-build',
@@ -14,61 +33,42 @@ function postBuildPlugin(): Plugin {
 			const distDir = path.resolve(__dirname, 'dist');
 			const assetsDir = path.join(distDir, 'assets');
 
-			// Track all .ts → .js renames for reference updates
+			// Bundle workers that Vite cannot handle automatically
+			for (const worker of EXTRA_WORKERS) {
+				const entry = path.resolve(__dirname, worker.entry);
+				if (!fs.existsSync(entry)) continue;
+				console.log(`[post-build] Bundling ${worker.fileName}`);
+				await build({
+					configFile: false,
+					root: path.resolve(__dirname, 'src/client'),
+					build: {
+						outDir: path.resolve(__dirname, worker.outDir),
+						emptyOutDir: false,
+						lib: {
+							entry,
+							formats: ['es'],
+							fileName: () => worker.fileName,
+						},
+						rollupOptions: { external: worker.external },
+						minify: true,
+					},
+					resolve: {
+						alias: { '/hackrf-web/pkg': path.resolve(__dirname, 'hackrf-web/pkg') },
+					},
+					logLevel: 'warn',
+				});
+			}
+
+			// Vite sometimes emits worker files with their original .ts extension.
+			// Rename them and fix all references so the browser can load them.
 			const renames = new Map<string, string>();
-
-			// --- Bundle nested workers (Vite doesn't bundle workers spawned from workers) ---
 			for (const file of fs.readdirSync(assetsDir)) {
-				const filePath = path.join(assetsDir, file);
-				if (!file.endsWith('.ts') && !file.endsWith('.js')) continue;
-
-				const content = fs.readFileSync(filePath, 'utf-8');
-				if (content.includes("from './") || content.includes("from '../")) {
-					console.log(`[post-build] Bundling nested worker: ${file}`);
-					const jsName = file.replace(/\.ts$/, '.js');
-					renames.set(file, jsName);
-
-					await build({
-						configFile: false,
-						root: path.resolve(__dirname, 'src/client'),
-						build: {
-							outDir: assetsDir,
-							emptyOutDir: false,
-							lib: {
-								entry: path.resolve(__dirname, 'src/client/dsp-worker.ts'),
-								formats: ['es'],
-								fileName: () => jsName,
-							},
-							rollupOptions: {
-								external: [/\/hackrf-web\/pkg\//],
-							},
-							minify: true,
-						},
-						resolve: {
-							alias: {
-								'/hackrf-web/pkg': path.resolve(__dirname, 'hackrf-web/pkg'),
-							},
-						},
-						logLevel: 'warn',
-					});
-
-					// Remove the unbundled original .ts if it differs from the output
-					if (file !== jsName && fs.existsSync(filePath)) {
-						fs.unlinkSync(filePath);
-					}
-				}
+				if (!file.endsWith('.ts')) continue;
+				const jsName = file.replace(/\.ts$/, '.js');
+				renames.set(file, jsName);
+				fs.renameSync(path.join(assetsDir, file), path.join(assetsDir, jsName));
 			}
 
-			// --- Rename any remaining .ts output files to .js ---
-			for (const file of fs.readdirSync(assetsDir)) {
-				if (file.endsWith('.ts')) {
-					const jsName = file.replace(/\.ts$/, '.js');
-					renames.set(file, jsName);
-					fs.renameSync(path.join(assetsDir, file), path.join(assetsDir, jsName));
-				}
-			}
-
-			// --- Update all .ts → .js references in output files ---
 			if (renames.size > 0) {
 				for (const file of fs.readdirSync(assetsDir)) {
 					if (!file.endsWith('.js')) continue;
@@ -98,33 +98,7 @@ function postBuildPlugin(): Plugin {
 				}
 			}
 
-			// --- Bundle whisper-worker (loaded via plain URL, not Vite worker syntax) ---
-			const whisperEntry = path.resolve(__dirname, 'src/client/whisper-worker.ts');
-			if (fs.existsSync(whisperEntry)) {
-				console.log('[post-build] Bundling whisper-worker');
-				await build({
-					configFile: false,
-					root: path.resolve(__dirname, 'src/client'),
-					build: {
-						outDir: distDir,
-						emptyOutDir: false,
-						lib: {
-							entry: whisperEntry,
-							formats: ['es'],
-							fileName: () => 'whisper-worker.js',
-						},
-						rollupOptions: {
-							external: [
-								/^https?:\/\//,  // CDN imports stay external
-							],
-						},
-						minify: true,
-					},
-					logLevel: 'warn',
-				});
-			}
-
-			// --- Copy WASM files ---
+			// Copy WASM files
 			const wasmSrc = path.resolve(__dirname, 'hackrf-web/pkg');
 			const wasmDest = path.resolve(distDir, 'hackrf-web/pkg');
 			if (fs.existsSync(wasmSrc)) {
@@ -167,14 +141,18 @@ export default defineConfig({
 				navigateFallback: null,
 				runtimeCaching: [
 					{
-						// API routes: network-first (only works online)
-						urlPattern: /^.*\/api\/.*/i,
-						handler: 'NetworkFirst',
+						// Geo lookup: country code rarely changes — serve stale, revalidate in background
+						urlPattern: /\/api\/geo$/i,
+						handler: 'StaleWhileRevalidate',
 						options: {
-							cacheName: 'api-cache',
-							networkTimeoutSeconds: 5,
-							expiration: { maxEntries: 50, maxAgeSeconds: 60 * 60 },
+							cacheName: 'geo-cache',
+							expiration: { maxEntries: 5, maxAgeSeconds: 24 * 60 * 60 },
 						},
+					},
+					{
+						// TURN credentials expire server-side; a cached response would break WebRTC
+						urlPattern: /\/api\/turn$/i,
+						handler: 'NetworkOnly',
 					},
 				],
 			},

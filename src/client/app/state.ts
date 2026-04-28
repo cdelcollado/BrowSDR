@@ -1,94 +1,61 @@
 import { makeDefaultVfo, BOOKMARK_CATEGORIES } from './constants';
+import type {
+	Bookmark, BookmarkModal, BookmarkImportModal, BookmarkEdit, BookmarkCategory,
+	WhisperState, PocsagState, RadioState, DisplayState, ViewState,
+	VfoConflictDialog, Snackbar, Vfo,
+	RemoteClientEntry, DevicePickerEntry, VfoActivityStat, DspStats,
+} from './types';
+import type { DeviceCapabilities } from '../sdr-device';
 
-export function createAppData() {
+// ── Slice helpers ────────────────────────────────────────────────
+// Each function owns one logical section of app state. createAppData()
+// spreads them into the flat object that Vue's Options API data() expects.
+
+function remoteSlice() {
 	return {
-		backend: null as any,
-		connected: false,
-		running: false,
-		isOnline: navigator.onLine,
 		remoteMode: 'none' as 'none' | 'host' | 'client',
 		remoteStatus: '',
 		remoteLink: '',
 		copyLinkSuccess: false,
 		copyLinkTooltip: 'Copy link',
-		remoteClients: [] as Array<{ id: string; connectedAt: number; country: string; vfoCount: number; firstFreq: number | null; isRelay: boolean }>,
+		remoteClients: [] as RemoteClientEntry[],
 		showRemoteClientsDialog: false,
 		showRemoteConnectDialog: false,
 		remoteConnectId: '',
 		recentRemoteIds: [] as string[],
 		remotePeerId: '',
-		snackbar: { show: false, message: "" },
-		audioUnlockPendingId: null as string | null,
-		radio: {
-			centerFreq: 100.0,
-			sampleRate: 20000000,
-			fftSize: 65536,
-		},
-		display: {
-			minDB: -70.0,
-			maxDB: 0.0,
-		},
-		gains: {} as Record<string, number>,
-		deviceCapabilities: null as any,
-		locks: {
-			centerFreq: false,
-			sampleRate: false,
-		} as Record<string, boolean>,
-		vfos: [makeDefaultVfo(100.0)],
+	};
+}
+
+function vfoSlice(centerFreq: number) {
+	return {
+		vfos: [makeDefaultVfo(centerFreq)],
 		activeVfoIndex: 0,
-		info: { boardName: "" },
-		hoverFreqText: "",
-		dspStats: null as any,
-		showStats: false,
-		fps: 0,
 		vfoSquelchOpen: [] as boolean[],
 		vfoSquelchHangUntil: [] as number[],
-		vfoActivityStats: [] as Array<{ count: number; totalMs: number; squelchOpenSince: number | null }>,
+		vfoActivityStats: [] as VfoActivityStat[],
 		autoSquelchSamples: [] as Array<number[]>,
 		autoSquelchActive: [] as boolean[],
 		activityNow: 0,
 		showActivity: false,
-		view: {
-			zoomScale: 1.0,
-			zoomOffset: 0.0,
-			locked: false
-		},
-		whisper: {
-			panelOpen: false,
-			active: false,
-			status: 'idle' as string,
-			loadProgress: 0,
-			loadPhase: 'downloading' as string,
-			loadFile: '',
-			loadFilesDone: 0,
-			loadFilesTotal: 0,
-			model: 'onnx-community/whisper-small',
-			chunkSeconds: 10,
-			log: [] as Array<{ time: string; freq: string; text: string; duration: string; transcribeTime?: string; vfoIndex?: number | null }>,
-			statusMsg: '',
-			recording: false,
-			transcribing: false,
-			recordStart: null as Date | null,
-			recordDuration: 0,
-			pendingChunks: 0,
-		},
-		pocsag: {
-			panelOpen: false,
-			log: [] as Array<{ time: string; freq: string; vfoIndex: number; capcode: string; type: string; text: string; baud: number }>,
-		},
-		bookmarkCategories: BOOKMARK_CATEGORIES,
+	};
+}
+
+function bookmarkSlice() {
+	return {
+		bookmarkCategories: BOOKMARK_CATEGORIES as BookmarkCategory[],
 		bookmarkCategoryFilter: '',
 		bookmarkSearch: '',
-		bookmarks: [] as any[],
-		bookmarkModal: { show: false, type: 'individual', name: '', category: '' },
-		bookmarkImportModal: { show: false },
+		bookmarks: [] as Bookmark[],
+		syncToken: '' as string,
+		bookmarkModal: { show: false, type: 'individual', name: '', category: '' } as BookmarkModal,
+		bookmarkImportModal: { show: false } as BookmarkImportModal,
 		bookmarkEdit: {
 			show: false,
 			index: -1,
 			type: 'individual',
 			name: '',
 			category: '',
-			// individual fields
 			freq: 100.0,
 			mode: 'nfm',
 			bandwidth: 12500,
@@ -103,26 +70,95 @@ export function createAppData() {
 			rds: false,
 			rdsRegion: 'eu',
 			volume: 50,
-			// group fields
 			centerFreq: 100.0,
 			sampleRate: 8000000,
-			vfos: [] as any[],
+			vfos: [] as Vfo[],
 			activeVfoIndex: 0,
-		},
+		} as BookmarkEdit,
+	};
+}
+
+// ── Public factory ───────────────────────────────────────────────
+
+export function createAppData() {
+	const centerFreq = 100.0;
+	return {
+		// backend is a Comlink.Remote<Backend> at runtime; typed via AppInstance = any
+		backend: null as any,
+		connected: false,
+		running: false,
+		isOnline: navigator.onLine,
+
+		...remoteSlice(),
+
+		snackbar: { show: false, message: '' } as Snackbar,
+		audioUnlockPendingId: null as string | null,
+
+		radio: {
+			centerFreq,
+			sampleRate: 20_000_000,
+			fftSize: 65536,
+		} as RadioState,
+
+		display: { minDB: -70.0, maxDB: 0.0 } as DisplayState,
+
+		gains: {} as Record<string, number>,
+		deviceCapabilities: null as DeviceCapabilities | null,
+		locks: { centerFreq: false, sampleRate: false } as Record<string, boolean>,
+
+		...vfoSlice(centerFreq),
+
+		info: { boardName: '' },
+		hoverFreqText: '',
+		dspStats: null as DspStats | null,
+		showStats: false,
+		fps: 0,
+
+		view: { zoomScale: 1.0, zoomOffset: 0.0, locked: false } as ViewState,
+
+		whisper: {
+			panelOpen: false,
+			active: false,
+			status: 'idle' as string,
+			loadProgress: 0,
+			loadPhase: 'downloading' as string,
+			loadFile: '',
+			loadFilesDone: 0,
+			loadFilesTotal: 0,
+			model: 'onnx-community/whisper-small',
+			chunkSeconds: 10,
+			log: [] as WhisperState['log'],
+			statusMsg: '',
+			recording: false,
+			transcribing: false,
+			recordStart: null as Date | null,
+			recordDuration: 0,
+			pendingChunks: 0,
+		} as WhisperState,
+
+		pocsag: {
+			panelOpen: false,
+			log: [] as PocsagState['log'],
+		} as PocsagState,
+
+		...bookmarkSlice(),
+
 		devicePicker: {
 			show: false,
-			devices: [] as Array<{ device: USBDevice; driverName: string; productName: string }>,
+			devices: [] as DevicePickerEntry[],
 		},
+
 		sidebarOpen: false,
 		showAbout: false,
 		collapsedPanels: {} as Record<string, boolean>,
+
 		vfoConflictDialog: {
 			show: false,
 			vfoIndex: -1,
 			requestedFreq: 0,
 			previousFreq: 0,
-			optionA: null as { centerFreq: number; description: string } | null,
-			optionB: null as { centerFreq: number; description: string; excludedVfos: number[] } | null,
-		},
+			optionA: null,
+			optionB: null,
+		} as VfoConflictDialog,
 	};
 }

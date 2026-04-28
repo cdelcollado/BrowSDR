@@ -1,52 +1,53 @@
 # BrowSDR — Possible Improvements
 
 > Generated on 2026-04-26 from a static analysis of the codebase.
+> Last updated: 2026-04-28 — points 1–15 addressed.
 
 ---
 
 ## Critical
 
-1. **Near-zero test coverage** — Only 1 test file covering the Cloudflare Worker. No tests for Vue app logic, the DSP worker, device drivers, or the Rust/WASM pipeline. Vitest suites should be added for the main modules, along with integration tests for the DSP pipeline.
+1. ✅ **Near-zero test coverage** — Added `vitest.client.config.ts` + jsdom environment. New test suites: `test/client/dsp-pipeline.spec.ts` (25 tests), `test/client/state.spec.ts` (13 tests), `test/client/computed.spec.ts` (20 tests), `test/client/validation.spec.ts` (21 tests), `test/client/webrtc-backoff.spec.ts` (7 tests). `package.json` gained `test:client` script.
 
-2. **Fragmented error handling** — Silent `catch (_) {}` blocks exist (e.g. TURN API call in `worker/main.ts`), error messages lack context, and there is no centralized logging. A WASM failure can hang the app with no indication.
+2. ✅ **Fragmented error handling** — Created `src/client/logger.ts` (`logError`/`logWarn`/`logInfo`). Fixed WASM init silent-swallow bug in `dsp-worker.ts` (re-throws so the promise rejects and posts an error message). Replaced silent `catch (e) {}` in `settings.ts` and `bookmarks.ts` with `logWarn`. Standardised all driver transfer-error tags to `[BrowSDR:X]` prefix.
 
 ---
 
 ## High Priority
 
-3. **Monolithic state** (`app/state.ts`) — Over 60 fields in a single flat object. Should be split into slices (vfo, whisper, pocsag, remote) and `null as any` casts replaced with proper typed interfaces.
+3. ✅ **Monolithic state** (`app/state.ts`) — Split into `remoteSlice()`, `vfoSlice()`, `bookmarkSlice()` helpers. Added typed interfaces (`RemoteClientEntry`, `DevicePickerEntry`, `VfoActivityStat`, `DspStats`) in `app/types.ts`. Eliminated `null as any` / `[] as any[]` casts.
 
-4. **No backpressure on the DSP worker** — There is no message queue limit between the main thread and the worker. If DSP can't keep up, buffers would grow unboundedly.
+4. ✅ **No backpressure on the DSP worker** — Added `MAX_WORKER_PENDING = 4` counter per VFO in `worker/rx-stream.ts`. Chunks are dropped (and counted in `perf.droppedChunks`) when a worker's queue is full.
 
-5. **Missing input validation** — Frequency and gain parameters are not validated before being sent to device drivers, allowing out-of-range values to reach hardware.
+5. ✅ **Missing input validation** — Created `src/client/worker/validation.ts` (`validateFrequency`, `validateSampleRate`, `clampGain`, `validateAndClampGains`). All four functions called from `Backend.setSampleRate`, `setFrequency`, `setGain`, `setGains`.
 
 ---
 
 ## Medium Priority
 
-6. **Single-threaded DSP** — All multi-VFO processing runs in a single Web Worker. On modern machines this could be distributed across workers using `navigator.hardwareConcurrency`.
+6. ✅ **Single-threaded DSP** — Added `navigator.hardwareConcurrency` awareness: `rx-stream.ts` logs the recommended max VFO count at startup; `Backend.addVfo()` warns when the count exceeds `hardwareConcurrency - 1`; `DspStats` now exposes `workerCount` and `hardwareConcurrency`.
 
-7. **WebRTC reconnection without backoff** — PeerJS retries are immediate, which could flood the signaling server during network outages. Exponential backoff should be added.
+7. ✅ **WebRTC reconnection without backoff** — Added `backoffDelay(attempt, base, cap)` pure function (exported, tested). `connectWithRetry` now passes an `attempt` counter and delays `unavailable-id` retries via `setTimeout`. `disconnected` event handler performs up to `MAX_RECONNECT = 5` reconnects with exponential backoff + jitter; `reconnectAttempt` resets on `open`.
 
-8. **Inconsistent device drivers** — Each driver (HackRF, RTL-SDR, Airspy, AirspyHF) handles USB errors differently. A common error protocol is needed, along with a more faithful `mock-hackrf.ts`.
+8. ✅ **Inconsistent device drivers** — Unified error tags to `[BrowSDR:X]` in all four drivers. Added missing `default: console.warn(...)` to `setGain` in Airspy and AirspyHF. Fixed `MockHackRF` gain name `'Amp'` → `'Amp (14dB)'` to match the real `HackRFDevice`.
 
-9. **Fragile Vite config** — The post-build plugin that re-bundles workers and renames `.ts → .js` is brittle. The logic should be simplified or extracted to a separate script.
+9. ✅ **Fragile Vite config** — Replaced the content-sniffing heuristic (scanning for `from './'`) with an explicit `EXTRA_WORKERS` array. Workers to bundle are now declared at the top of the file; the two `build()` calls are unified into a single loop. The `.ts → .js` rename step is preserved as a safety net with a comment explaining why it exists.
 
-10. **PWA cache strategy** — The service worker uses network-first for `/api/*`, which would fail offline. The cache policy for TURN/geo endpoints should be revisited.
+10. ✅ **PWA cache strategy** — Split the single `/api/*` NetworkFirst rule into two: `/api/geo` uses `StaleWhileRevalidate` (country code rarely changes; works offline) and `/api/turn` uses `NetworkOnly` (TURN credentials expire server-side; a cached response would silently break WebRTC).
 
 ---
 
 ## Low Priority / Quality Improvements
 
-11. **TypeScript strictness** — Despite `strict: true` in tsconfig, `as any` casts are scattered throughout. Adding `@typescript-eslint/no-explicit-any` and defining discriminated unions for inter-worker messages would improve safety.
+11. ✅ **TypeScript strictness** — Created `src/client/worker/dsp-worker-types.ts` with `DspWorkerInMessage` / `DspWorkerOutMessage` discriminated unions and `DspWorkerVfoState` interface. Applied in `dsp-worker.ts` (typed `_wasm`, `ddc`, `vfoState`; removed `(self as any).postMessage`; typed `configureDDC`/`processVfoAudio` params; `err: unknown` in catch blocks) and in `rx-stream.ts` (`MessageEvent<DspWorkerOutMessage>`). Fixed `(window as any).webkitAudioContext` in `ui-helpers.ts` with a `declare global` interface extension. Duplicate `IF_RATES`/`AUDIO_RATE` constants removed from `dsp-worker.ts` (now imported from `worker/types.ts`). Typecheck passes with zero errors.
 
-12. **Undocumented Backend class** — Methods in `worker/main.ts` have no TSDoc. Understanding the Comlink proxy contract requires reading the full implementation.
+12. ✅ **Undocumented Backend class** — Added TSDoc to `worker/backend.ts`: class-level doc explaining the Comlink lifecycle and the `Comlink.proxy()` requirement for callbacks; method-level docs for `init`, `open`, `startRxStream`, `getDspStats` (squelch-latch side effect), `addVfo`, `removeVfo`, `setFrequency` (propagates to workers), and `startRx`.
 
-13. **Bookmark sync** — Bookmarks are stored in `localStorage` without encryption or cross-device sync. Integration with Cloudflare KV (already available in the edge worker) could address this.
+13. ✅ **Bookmark sync** — Added manual cloud sync via Cloudflare KV. Token-based (UUID generated once, stored in `localStorage`; share it between devices to sync). New edge routes: `GET /api/bookmarks?token=` and `PUT /api/bookmarks?token=` (512 KB limit, 1-year TTL). Client methods: `initSyncToken` (called from `loadBookmarks`), `pushToCloud`, `pullFromCloud` (merge or replace). KV namespace binding added to `wrangler.jsonc`; create with `npx wrangler kv namespace create BOOKMARKS` and fill in the returned IDs.
 
-14. **POCSAG deduplication** — If two VFOs are tuned to the same frequency, the POCSAG decoder processes the signal twice. A decoder pooling mechanism is needed.
+14. ✅ **POCSAG deduplication** — In `rx-stream.ts`, before creating or using a `POCSAGDecoder` for VFO `v`, a frequency-conflict check scans all lower-index VFOs (`i < v`) for one with `pocsag && mode === 'nfm'` at the same frequency (±1 kHz). If found, VFO `v` yields — it skips processing and releases any stale decoder. The lower-index VFO's decoder reports the message once.
 
-15. **Self-hosting** — The app depends on Cloudflare Workers for the TURN proxy. Documenting how to deploy on other platforms (e.g. a plain Node.js server) would reduce vendor lock-in.
+15. ✅ **Self-hosting** — Added `server.mjs`: a zero-dependency Node.js 18+ server that replicates all four Cloudflare Worker routes (`/api/geo`, `/api/turn`, `/api/bookmarks`, `/hf-proxy/*`), serves `dist/` as static files with the required COOP/COEP headers, and stores bookmarks in a local `bookmarks-store.json`. Configured via env vars (`PORT`, `TURN_URL`, `TURN_USER`, `TURN_PASS`, `GEO_COUNTRY`). Added `npm run serve` script. For production: place behind a TLS reverse proxy (nginx/Caddy) since WebUSB requires HTTPS.
 
 ---
 

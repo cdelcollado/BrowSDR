@@ -1,5 +1,6 @@
 import type { AppInstance } from './types';
 import { makeDefaultVfo } from './constants';
+import { logWarn } from '../logger';
 
 export const settingsMethods = {
 	saveSetting(this: AppInstance) {
@@ -48,7 +49,7 @@ export const settingsMethods = {
 				if (setting.collapsedPanels && typeof setting.collapsedPanels === 'object') Object.assign(this.collapsedPanels, setting.collapsedPanels);
 				if (setting.recentRemoteIds && Array.isArray(setting.recentRemoteIds)) this.recentRemoteIds = setting.recentRemoteIds;
 			}
-		} catch (e) { }
+		} catch (e) { logWarn('Settings', 'Failed to load saved settings', e); }
 	},
 	requestOrApplyChange(this: AppInstance, target: string, property: string, value: any) {
 		if (this.remoteMode === 'client') {

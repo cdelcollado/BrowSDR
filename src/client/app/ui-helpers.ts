@@ -1,6 +1,10 @@
 import type { AppInstance } from './types';
 import { VFO_COLORS } from './constants';
 
+declare global {
+    interface Window { webkitAudioContext?: typeof AudioContext; }
+}
+
 export const uiHelperMethods = {
 	copyRemoteLink(this: AppInstance) {
 		navigator.clipboard.writeText(this.remoteLink).then(() => {
@@ -126,7 +130,7 @@ export const uiHelperMethods = {
 	},
 	_initAudioCtx(this: AppInstance) {
 		if (!this.audioCtx) {
-			const AudioContext = (window as any).AudioContext || (window as any).webkitAudioContext;
+			const AudioContext = window.AudioContext ?? window.webkitAudioContext!;
 			this.audioCtx = new AudioContext({ sampleRate: 48000 });
 			this.gainNode = this.audioCtx.createGain();
 			this.gainNode.gain.value = 1.0;

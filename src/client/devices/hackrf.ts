@@ -83,7 +83,7 @@ export class HackRFDevice implements SdrDevice {
 			case 'LNA': await this.hackrf.setLnaGain(value); break;
 			case 'VGA': await this.hackrf.setVgaGain(value); break;
 			case 'Amp (14dB)': await this.hackrf.setAmpEnable(!!value); break;
-			default: console.warn(`HackRF: unknown gain "${name}"`);
+			default: console.warn(`[BrowSDR:HackRF] unknown gain "${name}"`);
 		}
 	}
 

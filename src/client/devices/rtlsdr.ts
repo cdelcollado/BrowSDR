@@ -2019,7 +2019,7 @@ export class RtlSdrDevice implements SdrDevice {
 				} catch (e: unknown) {
 					if (this.rxRunning) {
 						const msg = e instanceof Error ? e.message : String(e);
-						console.error('RTL-SDR: transfer error:', msg);
+						console.error('[BrowSDR:RtlSdr] transfer error:', msg);
 					}
 					break;
 				}

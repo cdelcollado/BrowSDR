@@ -56,7 +56,7 @@ Enjoy the power of a desktop SDR platform fully within your web browser.
 |-------|-----------|
 | Frontend | TypeScript, Vue 3 (Options API), Vite |
 | DSP | Rust, RustFFT, WebAssembly, Web Workers |
-| Deployment | Cloudflare Workers (Wrangler) |
+| Deployment | Cloudflare Workers (Wrangler) or self-hosted Node.js 18+ |
 | Testing | Vitest, wasm-bindgen-test, cargo test |
 
 ---
@@ -74,7 +74,7 @@ Enjoy the power of a desktop SDR platform fully within your web browser.
 
 ---
 
-## ⚙️ Quick Start
+## ⚙️ Quick Start (development)
 
 ```bash
 # 1. Install dependencies
@@ -83,11 +83,14 @@ npm install
 # 2. Build the WASM module (first time or after Rust changes)
 cd hackrf-web && cargo make build && cd ..
 
-# 3. Start the local dev server
+# 3. Start the Cloudflare Worker dev server (API routes on http://localhost:8787)
+npx wrangler dev
+
+# 4. In a second terminal, start the Vite dev server
 npm run dev
 ```
 
-Then open **[http://localhost:5173](http://localhost:5173)** in Google Chrome or any WebUSB-supported browser.
+Open **[http://localhost:5173](http://localhost:5173)** in Chrome or Edge (WebUSB is not supported in Firefox).
 
 ---
 
@@ -98,8 +101,10 @@ Then open **[http://localhost:5173](http://localhost:5173)** in Google Chrome or
 | `npm run dev` | Start Vite dev server (http://localhost:5173) |
 | `npm run build` | Build client assets into `dist/` |
 | `npm run deploy` | Build and deploy to Cloudflare Workers |
+| `npm run serve` | Run self-hosted Node.js server (after `npm run build`) |
 | `npm run typecheck` | Run TypeScript type checking |
-| `npm run test` | Run tests with Vitest |
+| `npm run test` | Run all tests with Vitest |
+| `npm run test:client` | Run browser-client tests only (jsdom) |
 
 ### Building the WASM Module
 
@@ -110,7 +115,54 @@ cd hackrf-web
 cargo make build       # Build for web (output: hackrf-web/pkg/)
 ```
 
-> **Note:** The WASM build outputs in `hackrf-web/pkg/` are committed to the repo, so `npm run deploy` works seamlessly even without Rust installed on the CI/deployment machine.
+> **Note:** The WASM build outputs in `hackrf-web/pkg/` are committed to the repo, so `npm run deploy` and `npm run serve` work seamlessly even without Rust installed on the deployment machine.
+
+---
+
+## 🚢 Deployment
+
+BrowSDR can be deployed in two ways:
+
+### Option A — Cloudflare Workers (recommended)
+
+```bash
+npm run deploy
+```
+
+Deploys the built frontend and all API routes to the Cloudflare edge network. Requires a [Cloudflare account](https://cloudflare.com) and `wrangler` configured with your credentials.
+
+To enable bookmark cloud sync, first create a KV namespace:
+
+```bash
+npx wrangler kv namespace create BOOKMARKS
+```
+
+Fill in the returned `id` and `preview_id` in `wrangler.jsonc`, then redeploy.
+
+### Option B — Self-hosted Node.js
+
+No Cloudflare account needed. Requires **Node.js 18+**.
+
+```bash
+npm run build
+npm run serve
+```
+
+Open **http://localhost:8787** in Chrome or Edge.
+
+Configure via environment variables:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PORT` | Listening port | `8787` |
+| `TURN_URL` | TURN/STUN server hostname | — |
+| `TURN_USER` | TURN username | — |
+| `TURN_PASS` | TURN credential | — |
+| `GEO_COUNTRY` | Two-letter country code for `/api/geo` | `XX` |
+
+WebRTC remote sharing requires a TURN server (e.g. [coturn](https://github.com/coturn/coturn)). Without one, remote sharing only works on the same local network.
+
+In production, place the server behind a TLS-terminating reverse proxy (nginx, Caddy, Traefik) since WebUSB requires HTTPS outside of `localhost`.
 
 ---
 
@@ -129,8 +181,11 @@ cargo make build       # Build for web (output: hackrf-web/pkg/)
 ## 🧪 Testing
 
 ```bash
-# TypeScript / Worker tests
+# All tests (Cloudflare Worker + integration)
 npm run test
+
+# Browser-client tests only (Vue state, DSP pipeline, validation, WebRTC backoff)
+npm run test:client
 
 # Rust / WASM tests
 cd hackrf-web
