@@ -1,7 +1,7 @@
 # BrowSDR — Possible Improvements
 
 > Generated on 2026-04-26 from a static analysis of the codebase.
-> Last updated: 2026-04-28 — points 1–15 addressed.
+> Last updated: 2026-05-01 — points 1–16 addressed.
 
 ---
 
@@ -49,6 +49,8 @@
 
 15. ✅ **Self-hosting** — Added `server.mjs`: a zero-dependency Node.js 18+ server that replicates all four Cloudflare Worker routes (`/api/geo`, `/api/turn`, `/api/bookmarks`, `/hf-proxy/*`), serves `dist/` as static files with the required COOP/COEP headers, and stores bookmarks in a local `bookmarks-store.json`. Configured via env vars (`PORT`, `TURN_URL`, `TURN_USER`, `TURN_PASS`, `GEO_COUNTRY`). Added `npm run serve` script. For production: place behind a TLS reverse proxy (nginx/Caddy) since WebUSB requires HTTPS.
 
+16. ✅ **IQ recording/playback** — Raw `.s16` (int16 IQ) recording via File System Access API. IQ data is intercepted in the USB callback inside `rx-stream.ts`, converted from Int8 to Int16, and streamed to disk in batches. Playback uses `FileSdrDevice` (`file-sdr.ts`), an `SdrDevice` implementation that reads `.s16` files and feeds the existing DSP pipeline at the original sample rate with `setTimeout` pacing. New toolbar buttons (Record/Stop/Play from file) and bottom status panel. See `app/recording.ts` for the Vue integration. Compatible with SDR++, GQRX, and other SDR apps.
+
 ---
 
 ## New Feature Proposals
@@ -68,7 +70,7 @@
 
 | Feature | Description |
 |---|---|
-| **IQ recording/playback** | Record raw IQ samples to file and replay them — the most expected core SDR feature |
+| **IQ recording/playback** | ✅ Implemented — raw `.s16` format via File System Access API (see point 16) |
 | **Audio recording** | Save demodulated audio as WAV/MP3 |
 | **Waterfall export** | Export waterfall screenshot as PNG |
 
@@ -89,5 +91,5 @@
 
 ### Priority Recommendation
 
-1. **IQ recording/playback** — highest effort-to-value ratio; expected by most SDR users and enables offline decoder testing without hardware.
-2. **ADS-B** — highly visual, shareable result (live aircraft map from the browser).
+1. **ADS-B** — highly visual, shareable result (live aircraft map from the browser).
+2. **Audio recording** — Save demodulated audio as WAV/MP3.

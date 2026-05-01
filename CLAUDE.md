@@ -55,11 +55,13 @@ BrowSDR is a browser-based SDR (Software Defined Radio) app. It has two distinct
 **Browser client (`src/client/`)** — the actual SDR application:
 
 - `app/` — Vue 3 (Options API) application. `app/main.ts` is the entry point. State lives in `app/state.ts`; per-VFO computed values in `app/computed.ts`.
+  - `app/recording.ts` — IQ recording/playback methods: save/stop IQ to `.s16` via File System Access API, and play back `.s16` files from disk.
 - `worker/` — Web Worker that runs all DSP off the main thread. `worker/backend.ts` exposes the `Backend` class via [Comlink](https://github.com/GoogleChromeLabs/comlink). The main thread communicates with it through a Comlink proxy. `worker/dsp-pipeline.ts` is the signal processing chain.
   - `worker/dsp-worker-types.ts` — discriminated union types for the DSP worker message protocol (`DspWorkerInMessage`, `DspWorkerOutMessage`, `DspWorkerVfoState`).
   - `worker/validation.ts` — input validation helpers (`validateFrequency`, `validateSampleRate`, `clampGain`, `validateAndClampGains`).
   - `worker/types.ts` — shared interfaces and constants (`VfoParams`, `VfoState`, `PerfCounters`, `IF_RATES`, `AUDIO_RATE`, …).
 - `devices/` — WebUSB device drivers for HackRF, Airspy, AirspyHF, and RTL-SDR. Each implements the `SdrDevice` interface from `sdr-device.ts`.
+- `file-sdr.ts` — `FileSdrDevice`, an `SdrDevice` implementation that feeds IQ from `.s16` files into the DSP pipeline at the recorded sample rate.
 - `dsp-worker.ts` / `whisper-worker.ts` — dedicated workers for DSP and Whisper AI transcription respectively.
 - `logger.ts` — centralised logging helpers (`logError`, `logWarn`, `logInfo`) with `[BrowSDR:Tag]` prefix.
 - `webrtc.ts` + `app/remote.ts` — WebRTC remote sharing via PeerJS.
