@@ -13,6 +13,7 @@ import { whisperMethods } from './whisper';
 import { pocsagMethods } from './pocsag';
 import { zoomMethods } from './zoom';
 import { remoteMethods } from './remote';
+import { recordingMethods } from './recording';
 
 const Backend = Comlink.wrap<any>(new Worker(new URL('../worker/main.ts', import.meta.url), { type: 'module' }));
 
@@ -38,6 +39,7 @@ createApp({
 		...pocsagMethods,
 		...zoomMethods,
 		...remoteMethods,
+		...recordingMethods,
 	},
 	created: async function () {
 		this.loadSetting();

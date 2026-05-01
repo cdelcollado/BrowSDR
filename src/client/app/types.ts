@@ -168,6 +168,14 @@ export interface VfoActivityStat {
 	squelchOpenSince: number | null;
 }
 
+export interface IqRecordingState {
+	active: boolean;
+	startTime: number | null;
+	duration: number;
+	fileHandle: any;
+	writable: any;
+}
+
 export interface DspStats {
 	squelchOpen: boolean[];
 	squelchDb: number[];

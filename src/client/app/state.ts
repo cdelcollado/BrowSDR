@@ -3,7 +3,7 @@ import type {
 	Bookmark, BookmarkModal, BookmarkImportModal, BookmarkEdit, BookmarkCategory,
 	WhisperState, PocsagState, RadioState, DisplayState, ViewState,
 	VfoConflictDialog, Snackbar, Vfo,
-	RemoteClientEntry, DevicePickerEntry, VfoActivityStat, DspStats,
+	RemoteClientEntry, DevicePickerEntry, VfoActivityStat, DspStats, IqRecordingState,
 } from './types';
 import type { DeviceCapabilities } from '../sdr-device';
 
@@ -147,6 +147,15 @@ export function createAppData() {
 			show: false,
 			devices: [] as DevicePickerEntry[],
 		},
+
+		iqRecording: {
+			active: false,
+			startTime: null as number | null,
+			duration: 0,
+			fileHandle: null,
+			writable: null,
+		} as IqRecordingState,
+		iqPlaying: false,
 
 		sidebarOpen: false,
 		showAbout: false,

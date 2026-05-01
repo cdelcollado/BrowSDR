@@ -126,3 +126,18 @@ export const IF_RATES: Record<string, number> = {
 };
 
 export const AUDIO_RATE = 48000;
+
+/** IQ recording: batch size (in IQ sample pairs) before flushing to main thread */
+export const IQ_RECORD_BATCH_SIZE = 131072;
+
+export interface IqRecordOpts {
+	sampleRate: number;
+	centerFreq: number;
+}
+
+export interface FilePlaybackOpts {
+	data: ArrayBuffer;
+	sampleRate: number;
+	centerFreq: number;
+	format: 's16';
+}

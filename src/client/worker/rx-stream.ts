@@ -28,6 +28,16 @@ import type { Backend } from './backend';
 import type { DspWorkerOutMessage } from './dsp-worker-types';
 
 let _streamStarting = false;
+let _iqRecordCb: ((chunk: Int16Array) => void) | null = null;
+let _iqRecordBuf: number[] = [];
+const IQ_RECORD_BATCH_SAMPLES = 131072;
+
+export function setIqRecordCallback(active: boolean, callback: ((chunk: Int16Array) => void) | null): void {
+	_iqRecordCb = active ? callback : null;
+	if (!active) {
+		_iqRecordBuf = [];
+	}
+}
 
 export async function startRxStream(
 	backend: Backend,
@@ -659,6 +669,22 @@ export async function startRxStream(
 			const signed = new Int8Array(data.buffer, data.byteOffset, data.length);
 			perf.lastChunkSize = signed.length;
 			perf.inputSamplesSum += signed.length / 2;
+
+			// IQ Recording: accumulate and flush in batches
+			if (_iqRecordCb) {
+				for (let i = 0; i < signed.length; i++) {
+					_iqRecordBuf.push(signed[i]);
+				}
+				while (_iqRecordBuf.length >= IQ_RECORD_BATCH_SAMPLES * 2) {
+					const batchLen = IQ_RECORD_BATCH_SAMPLES * 2;
+					const i16 = new Int16Array(IQ_RECORD_BATCH_SAMPLES);
+					for (let j = 0; j < IQ_RECORD_BATCH_SAMPLES; j++) {
+						i16[j] = _iqRecordBuf[j * 2] << 8;
+					}
+					_iqRecordCb(i16);
+					_iqRecordBuf.splice(0, batchLen);
+				}
+			}
 
 			// Write USB chunk directly to WASM memory shared buffer if using SAB
 			backend.sharedIqViews![backend.sabPoolIndex!].set(signed);

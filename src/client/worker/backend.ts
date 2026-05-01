@@ -46,9 +46,10 @@ import {
 	initRemoteClient,
 	feedRemoteAudioChunk,
 } from './remote-clients';
-import { startRxStream } from './rx-stream';
+import { startRxStream, setIqRecordCallback } from './rx-stream';
 import { validateFrequency, validateSampleRate, clampGain, validateAndClampGains } from './validation';
-import type { VfoParams, VfoState, PerfCounters, RxStreamOpts, RemoteClientState, DeviceOpenOpts } from './types';
+import type { VfoParams, VfoState, PerfCounters, RxStreamOpts, RemoteClientState, DeviceOpenOpts, FilePlaybackOpts } from './types';
+import { FileSdrDevice } from './file-sdr';
 
 /**
  * SDR backend running inside a Web Worker, exposed to the main thread via Comlink.
@@ -268,6 +269,53 @@ export class Backend {
 		this.vfoParams.splice(index, 1);
 		this.dspWorkers!.splice(index, 1);
 		this.vfoStates!.splice(index, 1);
+	}
+
+	// ── IQ Recording ────────────────────────────────────────────────
+	_iqRecordCallback?: ((chunk: Int16Array) => void) | null;
+	_iqRecordActive?: boolean;
+
+	setIqRecording(active: boolean, callback?: any): void {
+		this._iqRecordActive = active;
+		this._iqRecordCallback = active ? callback : null;
+		setIqRecordCallback(active, active ? callback : null);
+	}
+
+	// ── File Playback ────────────────────────────────────────────────
+	_filePlaybackDevice?: FileSdrDevice | null;
+
+	async playFile(opts: FilePlaybackOpts): Promise<boolean> {
+		if (this.device) {
+			await this.stopRx();
+			await this.device.close();
+		}
+		const device = new FileSdrDevice(opts.data, opts.sampleRate, opts.centerFreq);
+		this.device = device;
+		this._filePlaybackDevice = device;
+		return true;
+	}
+
+	stopFilePlayback(): void {
+		if (this._filePlaybackDevice) {
+			this._filePlaybackDevice.stopRx();
+			this._filePlaybackDevice = null;
+		}
+		if (this.device) {
+			this.device.close();
+			this.device = null;
+		}
+	}
+
+	pauseFilePlayback(): void {
+		this._filePlaybackDevice?.pause();
+	}
+
+	resumeFilePlayback(): void {
+		this._filePlaybackDevice?.resume();
+	}
+
+	getFilePlaybackPosition(): number {
+		return this._filePlaybackDevice?.position ?? 0;
 	}
 
 	// ── Generic device control methods ──────────────────────────────

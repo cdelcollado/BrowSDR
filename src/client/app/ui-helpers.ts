@@ -28,6 +28,15 @@ export const uiHelperMethods = {
 		return s.padStart(10, '0');
 	},
 	// Format a duration in milliseconds as a human-readable string (e.g. "2m 05s")
+	// Format seconds as mm:ss or h:mm:ss
+	formatDuration(this: AppInstance, sec: number) {
+		if (!sec || sec <= 0) return '0:00';
+		const h = Math.floor(sec / 3600);
+		const m = Math.floor((sec % 3600) / 60);
+		const s = sec % 60;
+		if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+		return `${m}:${String(s).padStart(2, '0')}`;
+	},
 	formatActivityDuration(this: AppInstance, ms: number) {
 		if (ms < 1000) return ms > 0 ? '<1s' : '0s';
 		const totalSec = Math.floor(ms / 1000);
