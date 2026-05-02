@@ -85,6 +85,9 @@
 				<button class="icon-btn" @click="togglePocsagPanel" :class="{ active: pocsag.panelOpen }" title="POCSAG Pager Decoder">
 					<svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-3 12H7v-2h10v2zm0-3H7V9h10v2zm0-3H7V6h10v2z"/></svg>
 				</button>
+				<button class="icon-btn" @click="toggleAdsbPanel" :class="{ active: adsb.panelOpen }" title="ADS-B Aircraft Decoder (1090 MHz)">
+					<svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>
+				</button>
 				<button class="icon-btn" @click="showActivity = !showActivity" :class="{ active: showActivity }" title="Frequency Activity Tracker">
 					<svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M3.5 18.49l6-6.01 4 4L22 6.92l-1.41-1.41-7.09 7.97-4-4L2 16.99l1.5 1.5z"/></svg>
 				</button>
@@ -233,7 +236,7 @@
 					</div>
 					<div class="panel-body panel-condensed" v-show="!collapsedPanels['vfo-' + i]">
 						<div class="mode-grid">
-							<label class="mode-radio" v-for="m in ['nfm','am','usb','lsb','wfm','dsb','cw','raw']" :key="m">
+							<label class="mode-radio" v-for="m in ['nfm','am','usb','lsb','wfm','dsb','cw','raw','adsb']" :key="m">
 								<input type="radio" :value="m" v-model="vfo.mode" :name="'mode-' + i" @change="applyModeDefaults(i)">
 								<span class="mode-btn">{{ m.toUpperCase() }}</span>
 							</label>
@@ -601,6 +604,52 @@
 					<span class="pocsag-text" v-if="entry.text">{{ entry.text }}</span>
 					<span class="pocsag-text pocsag-tone" v-else>(tone only)</span>
 				</div>
+			</div>
+		</div>
+
+		<!-- ADS-B Panel -->
+		<div class="pocsag-panel" v-if="adsb.panelOpen">
+			<div class="pocsag-header">
+				<div class="pocsag-title">
+					<svg viewBox="0 0 24 24" width="16" height="16" style="vertical-align:middle;margin-right:4px"><path fill="currentColor" d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>
+					ADS-B Decoder
+					<span class="pocsag-count" v-if="adsb.log.length">{{ adsb.log.length }} aircraft</span>
+				</div>
+				<div class="pocsag-controls">
+					<button class="btn transcript-btn" @click="clearAdsb" title="Clear log">Clear</button>
+					<button class="btn transcript-btn" @click="exportAdsb" title="Export as text" :disabled="adsb.log.length === 0">Export</button>
+				</div>
+			</div>
+			<div class="pocsag-body" ref="adsbBody">
+				<div v-if="adsb.log.length === 0" class="pocsag-empty">
+					No aircraft detected. Set a VFO to ADS-B mode at 1090 MHz and ensure your SDR supports this frequency.
+				</div>
+				<table class="adsb-table" v-if="adsb.log.length > 0">
+					<thead>
+						<tr>
+							<th>Time</th>
+							<th>ICAO</th>
+							<th>Callsign</th>
+							<th>Alt (ft)</th>
+							<th>Spd (kt)</th>
+							<th>Hdg</th>
+							<th>Lat</th>
+							<th>Lon</th>
+						</tr>
+					</thead>
+					<tbody>
+						<tr v-for="(entry, i) in adsb.log" :key="i" :style="{ borderLeft: '3px solid ' + vfoColor(entry.vfoIndex) }">
+							<td class="adsb-time">{{ entry.time }}</td>
+							<td class="adsb-icao">{{ entry.icao }}</td>
+							<td class="adsb-callsign">{{ entry.callsign }}</td>
+							<td class="adsb-alt">{{ entry.altitude ? entry.altitude.toLocaleString() : '' }}</td>
+							<td class="adsb-spd">{{ entry.speed || '' }}</td>
+							<td class="adsb-hdg">{{ entry.heading || '' }}</td>
+							<td class="adsb-pos">{{ entry.lat ? entry.lat.toFixed(4) : '' }}</td>
+							<td class="adsb-pos">{{ entry.lon ? entry.lon.toFixed(4) : '' }}</td>
+						</tr>
+					</tbody>
+				</table>
 			</div>
 		</div>
 

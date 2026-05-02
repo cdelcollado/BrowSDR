@@ -30,6 +30,10 @@ export const vfoMethods = {
 		const d = MODE_DEFAULTS[vfo.mode] || MODE_DEFAULTS.nfm;
 		if (vfo.mode === 'raw') {
 			vfo.bandwidth = this.radio.sampleRate;
+		} else if (vfo.mode === 'adsb') {
+			vfo.bandwidth = d.bandwidth;
+			vfo.freq = 1090.0;
+			vfo.displayFreq = this.formatFreq(1090.0);
 		} else {
 			vfo.bandwidth = d.bandwidth;
 		}
@@ -41,6 +45,7 @@ export const vfoMethods = {
 		vfo.stereo = false;
 		vfo.lowPass = d.lowPass;
 		vfo.highPass = false;
+		vfo.adsb = vfo.mode === 'adsb';
 	},
 	updateBackendVfoParams(this: AppInstance, index: number) {
 		if (this.backend && this.running && index >= 0 && index < this.vfos.length) {
@@ -64,6 +69,7 @@ export const vfoMethods = {
 				rdsRegion: vfo.rdsRegion,
 				volume: vfo.volume,
 				pocsag: vfo.pocsag,
+				adsb: vfo.adsb,
 			};
 
 			if (this.remoteMode === 'client' && this._webrtc) {

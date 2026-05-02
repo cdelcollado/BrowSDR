@@ -1188,6 +1188,67 @@ canvas {
 	font-style: italic;
 }
 
+/* ────── ADS-B Table ────── */
+.adsb-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-family: 'Roboto Mono', monospace;
+	font-size: 10px;
+}
+
+.adsb-table thead th {
+	position: sticky;
+	top: 0;
+	background: #1a1a2e;
+	border-bottom: 1px solid var(--border);
+	padding: 4px 6px;
+	text-align: left;
+	color: var(--text-muted);
+	font-weight: 600;
+	text-transform: uppercase;
+	font-size: 9px;
+	z-index: 1;
+}
+
+.adsb-table tbody td {
+	padding: 3px 6px;
+	border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+	color: var(--text);
+	white-space: nowrap;
+}
+
+.adsb-table tbody tr:hover {
+	background: rgba(255, 255, 255, 0.05);
+}
+
+.adsb-icao {
+	color: #80cbc4;
+}
+
+.adsb-callsign {
+	color: #ffb74d;
+	font-weight: 600;
+}
+
+.adsb-alt {
+	color: #a5d6a7;
+	text-align: right;
+}
+
+.adsb-spd {
+	color: #90caf9;
+	text-align: right;
+}
+
+.adsb-hdg {
+	text-align: right;
+}
+
+.adsb-pos {
+	color: #888;
+	font-size: 9px;
+}
+
 /* ────── Bookmarks ────── */
 .bookmark-panel-header {
 	/* inherits standard panel-header styles only */

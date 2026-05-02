@@ -15,6 +15,7 @@ export interface Vfo {
 	rdsRegion: string;
 	volume: number;
 	pocsag: boolean;
+	adsb: boolean;
 	displayFreq: string;
 	focused: boolean;
 }
@@ -57,6 +58,11 @@ export interface WhisperState {
 export interface PocsagState {
 	panelOpen: boolean;
 	log: Array<{ time: string; freq: string; vfoIndex: number; capcode: string; type: string; text: string; baud: number }>;
+}
+
+export interface AdsbState {
+	panelOpen: boolean;
+	log: Array<{ time: string; vfoIndex: number; icao: string; callsign: string; altitude: number; speed: number; heading: number; lat: number; lon: number; raw: string }>;
 }
 
 export interface ViewState {

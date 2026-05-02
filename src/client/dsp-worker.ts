@@ -3,6 +3,8 @@ import { RationalResampler } from './worker/dsp-pipeline';
 import type { DspWorkerInMessage, DspWorkerOutMessage, DspWorkerVfoState } from './worker/dsp-worker-types';
 import type { VfoParams } from './worker/types';
 import { IF_RATES, AUDIO_RATE } from './worker/types';
+import { ADSDecoder } from './worker/adsb';
+import type { ADSBDecodedMessage } from './worker/types';
 
 // --- Worker State ---
 let wasmInitPromise: Promise<void> | null = null;
@@ -11,6 +13,8 @@ let ddc!: DspProcessor;
 let vfoState!: DspWorkerVfoState;
 let sharedIqPtr = 0;
 let sharedSabViews: Int8Array[] | null = null;
+let adsbDecoder: ADSDecoder | null = null;
+let adsbMsgBuf: ADSBDecodedMessage[] = [];
 
 async function startup(): Promise<void> {
     if (!wasmInitPromise) {
@@ -74,75 +78,112 @@ self.onmessage = async (e: MessageEvent<DspWorkerInMessage>) => {
         configureDDC(msg.params, msg.centerFreq);
         self.postMessage({ type: "config_done" });
     }
-    else if (msg.type === "process") {
-        if (!ddc || !vfoState) {
-            console.log("DSP Worker: ddc/vfoState unavailable");
-            return;
-        }
+	else if (msg.type === "process") {
+		if (!ddc || !vfoState) {
+			console.log("DSP Worker: ddc/vfoState unavailable");
+			return;
+		}
 
-        // Copy payload into WASM memory
-        const wasmMemView = new Int8Array(_wasm.memory.buffer);
+		// Copy payload into WASM memory
+		const wasmMemView = new Int8Array(_wasm.memory.buffer);
 
-        if (msg.useSab && sharedSabViews && msg.sabIndex !== undefined) {
-            // Zero-copy grab from SAB ring!
-            wasmMemView.set(sharedSabViews[msg.sabIndex].subarray(0, msg.chunkLen), sharedIqPtr);
-        } else if (!msg.useSab) {
-            // Direct copy from received buffer
-            wasmMemView.set(new Int8Array(msg.chunk), sharedIqPtr);
-        } else {
-            return; // useSab requested but SAB not available
-        }
+		if (msg.useSab && sharedSabViews && msg.sabIndex !== undefined) {
+			// Zero-copy grab from SAB ring!
+			wasmMemView.set(sharedSabViews[msg.sabIndex].subarray(0, msg.chunkLen), sharedIqPtr);
+		} else if (!msg.useSab) {
+			// Direct copy from received buffer
+			wasmMemView.set(new Int8Array(msg.chunk), sharedIqPtr);
+		} else {
+			return; // useSab requested but SAB not available
+		}
 
-        try {
-            const processStart = performance.now();
-            const audioOut = processVfoAudio(msg.chunkLen, msg.params);
-            const processEnd = performance.now();
-            const dspTime = processEnd - processStart;
+		try {
+			if (msg.params.mode === 'adsb') {
+				processAdsb(msg.chunkLen);
+			} else {
+				const processStart = performance.now();
+				const audioOut = processVfoAudio(msg.chunkLen, msg.params);
+				const processEnd = performance.now();
+				const dspTime = processEnd - processStart;
 
-            if (audioOut) {
-                // We MUST slice/copy to isolate it from WASM before transferring
-                const cloneOut = audioOut.slice();
-                self.postMessage({
-                    type: "audio",
-                    samples: cloneOut.buffer,
-                    chunkId: msg.chunkId,
-                    squelchOpen: vfoState.squelchOpen,
-                    squelchDb: vfoState.squelchDb ?? -120,
-                    dspTime: dspTime
-                } satisfies DspWorkerOutMessage, { transfer: [cloneOut.buffer] });
-            } else {
-                self.postMessage({ type: "audio", samples: null, chunkId: msg.chunkId, squelchOpen: vfoState.squelchOpen, squelchDb: vfoState.squelchDb ?? -120, dspTime: dspTime });
-            }
-        } catch (err: unknown) {
-            self.postMessage({ type: "error", error: err instanceof Error ? err.message : String(err) });
-        }
-    }
+				if (audioOut) {
+					// We MUST slice/copy to isolate it from WASM before transferring
+					const cloneOut = audioOut.slice();
+					self.postMessage({
+						type: "audio",
+						samples: cloneOut.buffer,
+						chunkId: msg.chunkId,
+						squelchOpen: vfoState.squelchOpen,
+						squelchDb: vfoState.squelchDb ?? -120,
+						dspTime: dspTime
+					} satisfies DspWorkerOutMessage, { transfer: [cloneOut.buffer] });
+				} else {
+					self.postMessage({ type: "audio", samples: null, chunkId: msg.chunkId, squelchOpen: vfoState.squelchOpen, squelchDb: vfoState.squelchDb ?? -120, dspTime: dspTime });
+				}
+			}
+		} catch (err: unknown) {
+			self.postMessage({ type: "error", error: err instanceof Error ? err.message : String(err) });
+		}
+	}
 };
 
 function configureDDC(params: VfoParams, systemCenterFreq: number): void {
-    const ifRate = IF_RATES[params.mode];
-    if (ifRate === undefined) {
-        console.error(`[DSP Worker] Unknown mode "${params.mode}" — no IF rate defined. Skipping DDC config.`);
-        return;
-    }
-    if (vfoState.currentIfRate !== ifRate) {
-        vfoState.audioResampler = new RationalResampler(ifRate, AUDIO_RATE);
-        vfoState.currentIfRate = ifRate;
-        ddc.set_if_sample_rate(ifRate);
-    }
+	const ifRate = IF_RATES[params.mode];
+	if (ifRate === undefined) {
+		console.error(`[DSP Worker] Unknown mode "${params.mode}" — no IF rate defined. Skipping DDC config.`);
+		return;
+	}
+	if (vfoState.currentIfRate !== ifRate) {
+		vfoState.audioResampler = params.mode === 'adsb'
+			? null // ADS-B doesn't need audio resampling
+			: new RationalResampler(ifRate, AUDIO_RATE);
+		vfoState.currentIfRate = ifRate;
+		ddc.set_if_sample_rate(ifRate);
+	}
 
-    const offsetFreq = (params.freq - systemCenterFreq) * 1e6;
-    ddc.set_shift(systemSampleRate, offsetFreq);
-    ddc.set_bandwidth(params.bandwidth);
-    ddc.set_squelch(params.squelchLevel, params.squelchEnabled);
-    if (params.mode === 'wfm') {
-        ddc.set_wfm_mode(true);
-    } else {
-        ddc.set_wfm_mode(false);
-    }
+	const offsetFreq = (params.freq - systemCenterFreq) * 1e6;
+	ddc.set_shift(systemSampleRate, offsetFreq);
+	ddc.set_bandwidth(params.bandwidth);
+	ddc.set_squelch(params.squelchLevel, params.squelchEnabled);
+	if (params.mode === 'wfm') {
+		ddc.set_wfm_mode(true);
+	} else {
+		ddc.set_wfm_mode(false);
+	}
 
-    // Apply UI audio filters (High Pass 300Hz, Low Pass BW/2)
-    ddc.set_audio_filters(params.lowPass || false, params.highPass || false);
+	// Apply UI audio filters (High Pass 300Hz, Low Pass BW/2)
+	ddc.set_audio_filters(params.lowPass || false, params.highPass || false);
+
+	// ADS-B decoder lifecycle
+	if (params.mode === 'adsb') {
+		if (!adsbDecoder) {
+			adsbDecoder = new ADSDecoder(ifRate, (msg) => {
+				adsbMsgBuf.push(msg);
+			});
+		}
+	} else {
+		adsbDecoder = null;
+		adsbMsgBuf = [];
+	}
+}
+
+function processAdsb(chunkLenBytes: number): void {
+	if (!adsbDecoder) return;
+
+	const outPtr = ddc.process_iq_only_ptr(sharedIqPtr, chunkLenBytes);
+	const numOutValues = ddc.get_iq_output_len();
+	if (numOutValues === 0) return;
+
+	const iqOut = new Float32Array(_wasm.memory.buffer, outPtr, numOutValues);
+	adsbDecoder.process(iqOut);
+
+	if (adsbMsgBuf.length > 0) {
+		self.postMessage({
+			type: 'adsb',
+			msgs: adsbMsgBuf.splice(0),
+			chunkId: 0,
+		} satisfies DspWorkerOutMessage);
+	}
 }
 
 function processVfoAudio(chunkLenBytes: number, params: VfoParams): Float32Array | null {

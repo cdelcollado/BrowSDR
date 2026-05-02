@@ -22,7 +22,8 @@ import * as Comlink from 'comlink';
 import { FFT } from './wasm-init';
 import { RationalResampler } from './dsp-pipeline';
 import { POCSAGDecoder } from './pocsag';
-import type { RxStreamOpts, VfoParams, VfoState, PerfCounters } from './types';
+import { ADSDecoder } from './adsb';
+import type { RxStreamOpts, VfoParams, VfoState, PerfCounters, ADSBDecodedMessage } from './types';
 import { IF_RATES, AUDIO_RATE } from './types';
 import type { Backend } from './backend';
 import type { DspWorkerOutMessage } from './dsp-worker-types';
@@ -45,7 +46,8 @@ export async function startRxStream(
 	spectrumCallback: any,
 	audioCallback: any,
 	whisperCallback: any,
-	pocsagCallback: any
+	pocsagCallback: any,
+	adsbCallback: any
 ): Promise<void> {
 	if (_streamStarting) return;
 	_streamStarting = true;
@@ -98,7 +100,7 @@ export async function startRxStream(
 		if (backend.ddcs) backend.ddcs.forEach((d: any) => { try { d.free(); } catch (_) { } });
 
 		// Initialize dynamic VFO arrays (start with one VFO)
-		const defaultVfoParams: VfoParams = { freq: centerFreq, mode: 'wfm', enabled: false, deEmphasis: '50us', squelchEnabled: false, squelchLevel: -100.0, lowPass: true, highPass: false, bandwidth: initialBandwidth, volume: 50, pocsag: false };
+		const defaultVfoParams: VfoParams = { freq: centerFreq, mode: 'wfm', enabled: false, deEmphasis: '50us', squelchEnabled: false, squelchLevel: -100.0, lowPass: true, highPass: false, bandwidth: initialBandwidth, volume: 50, pocsag: false, adsb: false };
 		backend.vfoParams = [{ ...defaultVfoParams }];
 
 		const MAX_USB_SAMPLES = 131072;
@@ -154,6 +156,16 @@ export async function startRxStream(
 					if (currentIndex === -1) return; // worker was removed
 					if (workerPending[currentIndex] > 0) workerPending[currentIndex]--;
 					backend._handleWorkerAudio!(currentIndex, msg);
+				} else if (msg.type === "adsb") {
+					const currentIndex = backend.dspWorkers!.indexOf(worker);
+					if (currentIndex === -1) return;
+					if (workerPending[currentIndex] > 0) workerPending[currentIndex]--;
+					if (adsbCallback && msg.msgs.length > 0) {
+						const params = backend.vfoParams![currentIndex];
+						for (const m of msg.msgs) {
+							adsbCallback(currentIndex, params.freq, m);
+						}
+					}
 				} else if (msg.type === "error") {
 					const currentIndex = backend.dspWorkers!.indexOf(worker);
 					if (workerPending[currentIndex] > 0) workerPending[currentIndex]--;

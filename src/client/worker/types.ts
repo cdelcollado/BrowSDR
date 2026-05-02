@@ -30,6 +30,7 @@ export interface VfoParams {
 	bandwidth: number;
 	volume: number;
 	pocsag: boolean;
+	adsb: boolean;
 }
 
 export interface VfoState {
@@ -113,6 +114,19 @@ export interface DeviceOpenOpts {
 	serialNumber?: string;
 }
 
+export interface ADSBDecodedMessage {
+	icao: string;
+	tc: number;
+	callsign?: string;
+	altitude?: number;
+	lat?: number;
+	lon?: number;
+	speed?: number;
+	heading?: number;
+	vs?: number;
+	raw: string;
+}
+
 /** IF sample rates per demodulation mode */
 export const IF_RATES: Record<string, number> = {
 	nfm: 50000,
@@ -123,6 +137,7 @@ export const IF_RATES: Record<string, number> = {
 	dsb: 24000,
 	cw: 3000,
 	raw: 48000,
+	adsb: 2000000,
 };
 
 export const AUDIO_RATE = 48000;

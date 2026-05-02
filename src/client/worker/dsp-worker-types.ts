@@ -8,10 +8,11 @@ export type DspWorkerInMessage =
     | { type: 'process'; params: VfoParams; useSab: false; chunk: ArrayBuffer; chunkLen: number; chunkId: number };
 
 export type DspWorkerOutMessage =
-    | { type: 'init_done' }
-    | { type: 'config_done' }
-    | { type: 'audio'; samples: ArrayBuffer | null; chunkId: number; squelchOpen: boolean; squelchDb: number; dspTime: number }
-    | { type: 'error'; error: string };
+	| { type: 'init_done' }
+	| { type: 'config_done' }
+	| { type: 'audio'; samples: ArrayBuffer | null; chunkId: number; squelchOpen: boolean; squelchDb: number; dspTime: number }
+	| { type: 'adsb'; msgs: import('./types').ADSBDecodedMessage[]; chunkId: number }
+	| { type: 'error'; error: string };
 
 export interface DspWorkerVfoState {
     dcAvg: number;

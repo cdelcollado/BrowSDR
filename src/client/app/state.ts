@@ -1,7 +1,7 @@
 import { makeDefaultVfo, BOOKMARK_CATEGORIES } from './constants';
 import type {
 	Bookmark, BookmarkModal, BookmarkImportModal, BookmarkEdit, BookmarkCategory,
-	WhisperState, PocsagState, RadioState, DisplayState, ViewState,
+	WhisperState, PocsagState, AdsbState, RadioState, DisplayState, ViewState,
 	VfoConflictDialog, Snackbar, Vfo,
 	RemoteClientEntry, DevicePickerEntry, VfoActivityStat, DspStats, IqRecordingState,
 } from './types';
@@ -140,6 +140,11 @@ export function createAppData() {
 			panelOpen: false,
 			log: [] as PocsagState['log'],
 		} as PocsagState,
+
+		adsb: {
+			panelOpen: false,
+			log: [] as AdsbState['log'],
+		} as AdsbState,
 
 		...bookmarkSlice(),
 

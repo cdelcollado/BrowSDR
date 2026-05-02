@@ -23,6 +23,7 @@ export const makeDefaultVfo = (freq = 100.0) => ({
 	rdsRegion: 'eu',
 	volume: 50,
 	pocsag: false,
+	adsb: false,
 	displayFreq: freq.toFixed(6).padStart(10, '0'),
 	focused: false,
 });
@@ -56,4 +57,5 @@ export const MODE_DEFAULTS: Record<string, { bandwidth: number; snapInterval: nu
 	dsb: { bandwidth: 4600, snapInterval: 100, deEmphasis: 'none', lowPass: false },
 	cw: { bandwidth: 200, snapInterval: 10, deEmphasis: 'none', lowPass: false },
 	raw: { bandwidth: 48000, snapInterval: 2500, deEmphasis: 'none', lowPass: false },
+	adsb: { bandwidth: 2000000, snapInterval: 1000000, deEmphasis: 'none', lowPass: false },
 };

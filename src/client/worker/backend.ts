@@ -184,8 +184,8 @@ export class Backend {
 	 * `spectrumCallback(fftData: Float32Array)` fires at ~10 Hz.
 	 * `audioCallback(vfoIndex, samples: Float32Array)` fires per decoded audio chunk.
 	 */
-	async startRxStream(opts: RxStreamOpts, spectrumCallback: any, audioCallback: any, whisperCallback: any = null, pocsagCallback: any = null): Promise<void> {
-		return startRxStream(this, opts, spectrumCallback, audioCallback, whisperCallback, pocsagCallback);
+	async startRxStream(opts: RxStreamOpts, spectrumCallback: any, audioCallback: any, whisperCallback: any = null, pocsagCallback: any = null, adsbCallback: any = null): Promise<void> {
+		return startRxStream(this, opts, spectrumCallback, audioCallback, whisperCallback, pocsagCallback, adsbCallback);
 	}
 
 	/**
@@ -247,7 +247,7 @@ export class Backend {
 		}
 		const centerFreq = this._centerFreq || 100.0;
 		const bw = 150000;
-		const params: VfoParams = { freq: centerFreq, mode: 'wfm', enabled: false, deEmphasis: '50us', squelchEnabled: false, squelchLevel: -100.0, lowPass: true, highPass: false, bandwidth: bw, volume: 50, pocsag: false };
+		const params: VfoParams = { freq: centerFreq, mode: 'wfm', enabled: false, deEmphasis: '50us', squelchEnabled: false, squelchLevel: -100.0, lowPass: true, highPass: false, bandwidth: bw, volume: 50, pocsag: false, adsb: false };
 		this.vfoParams.push(params);
 
 		const index = this.vfoParams.length - 1;
