@@ -3,6 +3,7 @@
 [![BrowSDR Live](https://img.shields.io/badge/Live-browsdr.jlynx.net-success?style=for-the-badge&logo=cloudflare)](https://browsdr.jlynx.net)
 [![Rust](https://img.shields.io/badge/Rust-High%20Performance-orange?style=for-the-badge&logo=rust)](https://www.rust-lang.org/)
 [![WebAssembly](https://img.shields.io/badge/Wasm-Powered-blue?style=for-the-badge&logo=webassembly)](https://webassembly.org/)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/cdelcollado/BrowSDR)
 
 A blazing fast, next-generation browser-based Software Defined Radio (SDR) receiver for [HackRF](https://greatscottgadgets.com/hackrf/). Connect a HackRF device directly to your browser via WebUSB and tune into FM, AM, SSB, CW, and more — **no drivers, no native software, no hassle.**
 
