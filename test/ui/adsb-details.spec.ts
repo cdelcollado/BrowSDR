@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
 import AdsbDetails from '@/app/decoders/adsb/details';
+import { feet } from './helpers/altitude';
 
 const aircraft = { icao: 'C827EE', callsign: 'ANZ123', lastSeen: 1000, messages: 1, squawk: '0123', altitude: 12000 };
 const record = {
@@ -25,7 +26,7 @@ describe('selected aircraft details', () => {
 		await vi.waitFor(() => expect(wrapper.text()).toContain('ZK-NNF'));
 		for (const value of [
 			'0123',
-			'12,000 ft',
+			feet(12000),
 			'Air New Zealand',
 			'Airline country',
 			'Landplane',
@@ -35,7 +36,7 @@ describe('selected aircraft details', () => {
 		])
 			expect(wrapper.text()).toContain(value);
 		await wrapper.setProps({ aircraft: { ...aircraft, altitude: 13000 }, now: 3000 });
-		expect(wrapper.text()).toContain('13,000 ft');
+		expect(wrapper.text()).toContain(feet(13000));
 		expect(provider.lookupAircraft).toHaveBeenCalledOnce();
 		expect(provider.lookupAirline).toHaveBeenCalledOnce();
 		wrapper.unmount();
@@ -71,7 +72,7 @@ describe('selected aircraft details', () => {
 			global: { provide: { aircraftMetadata: provider } },
 		});
 		await vi.waitFor(() => expect(wrapper.text()).toContain('database unavailable'));
-		expect(wrapper.text()).toContain('12,000 ft');
+		expect(wrapper.text()).toContain(feet(12000));
 		await wrapper
 			.findAll('button')
 			.find((button) => button.text() === 'Retry database lookup')!
