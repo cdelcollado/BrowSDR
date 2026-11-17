@@ -9,6 +9,7 @@ import { vfoMethods } from '@/app/radio/vfo';
 import type { AppInstance } from '@/app/core/receiver.types';
 import type { AdsbMessage } from '@/worker/decoders/adsb/types';
 import { createAppData } from '@/app/core/state';
+import { feet } from './helpers/altitude';
 
 vi.mock('leaflet', () => ({}));
 vi.mock('@/app/decoders/adsb/database/lookup', () => ({
@@ -183,7 +184,7 @@ describe('ADS-B receiver controls and aircraft map', () => {
 		wrapper.vm._onAdsbMessage(0, 1090, snapshot());
 		await nextTick();
 		expect(wrapper.get('.adsb-table').text()).toContain('TEST123');
-		expect(wrapper.get('.adsb-table').text()).toContain('38,000 ft');
+		expect(wrapper.get('.adsb-table').text()).toContain(feet(38000));
 		expect(wrapper.text()).toContain('1 aircraft · 1 located');
 		await wrapper.get('input[aria-label="Search aircraft"]').setValue('unknown');
 		expect(wrapper.text()).toContain('No aircraft match');

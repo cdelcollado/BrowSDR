@@ -4,6 +4,7 @@ import { updateAircraft } from '@/worker/decoders/adsb/messages';
 import { validAdsbMessage } from '@/worker/decoders/adsb/validation';
 import { aircraftColor } from '@/app/decoders/adsb/map/colors';
 import { aircraftTooltip } from '@/app/decoders/adsb/map/tooltip';
+import { feet } from './helpers/altitude';
 
 describe('ADS-B aircraft category icons', () => {
 	it('matches the altitude palette and keeps unknown altitude grey', () => {
@@ -24,7 +25,7 @@ describe('ADS-B aircraft category icons', () => {
 		});
 		expect(card.textContent).toContain('TEST123');
 		expect(card.textContent).toContain('0123');
-		expect(card.textContent).toContain('2,000 ft');
+		expect(card.textContent).toContain(feet(2000));
 		expect(card.querySelector('img')).toBeNull();
 	});
 	it('decodes a broadcast rotorcraft category and validates it across the worker boundary', () => {
